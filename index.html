@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>微信回复助手</title>
+  <meta name="description" content="粘贴微信对话，按朋友档案生成候选回复">
+  <meta name="theme-color" content="#f5f6f7">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="回复助手">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="app">
+
+    <!-- 主界面：回复助手 -->
+    <section id="view-chat" class="view">
+      <header class="view-header">
+        <h1>回复助手</h1>
+        <button id="btn-new-chat" class="btn-ghost" type="button">新对话</button>
+      </header>
+
+      <div id="persona-area" class="persona-area"></div>
+
+      <div id="conversation-area" class="conversation-area"></div>
+
+      <div class="opinion-block">
+        <label for="opinion-input" class="opinion-label">
+          我的看法 <span class="opinion-hint">最高优先级，可不填</span>
+        </label>
+        <textarea id="opinion-input" rows="2"
+          placeholder="比如：我觉得该收尾了 / 我想问问他周末有没有空"></textarea>
+      </div>
+
+      <button id="btn-generate" class="btn-primary" type="button">生成回复</button>
+
+      <div id="result-area" class="result-area"></div>
+
+      <div id="summary-area" class="summary-area"></div>
+    </section>
+
+    <!-- 档案管理页 -->
+    <section id="view-manage" class="view" hidden>
+      <header class="view-header">
+        <h1>档案</h1>
+      </header>
+      <div id="profiles-section"></div>
+      <div id="presets-section"></div>
+      <div id="settings-section"></div>
+    </section>
+
+  </main>
+
+  <!-- 底部 tab 栏 -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-view="chat" type="button">回复</button>
+    <button class="tab-btn" data-view="manage" type="button">档案</button>
+  </nav>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
