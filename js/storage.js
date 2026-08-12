@@ -293,11 +293,11 @@ function emptySession() {
   return {
     schemaVersion: SCHEMA_VERSION,
     selected: null,            // {type:'profile'|'preset', id} | null
-    firstRole: 'them',         // 粘贴框第 i 框角色 = i 偶数取 firstRole，否则相反
-    convo: [{ text: '' }],     // 对话记录工作区（交替粘贴框）
-    convoCollapsed: false,     // 工作区是否收起
+    firstRole: 'them',         // 待发送粘贴框第 i 框角色 = i 偶数取 firstRole，否则相反
+    convo: [{ text: '' }],     // 待发送的新消息粘贴框（时间线底部）
+    convoMode: 'delta',        // 标记 chat 里 user 轮的 convo 是增量（旧数据是全量快照）
     // 与参谋的对话。user 轮: {role:'user', text, convo:[{role:'them'|'me',text}]|null}
-    // convo 是发送当时的对话记录快照（与上一次相同则为 null）；assistant 轮: {role, content}
+    // convo 是该轮新贴的微信消息（增量）；assistant 轮: {role, content}
     chat: [],
     inputDraft: '',            // 输入框未发送的草稿
     updatedAt: null,
@@ -318,7 +318,6 @@ export function getSession() {
   }
   if (!s.convo.length) s.convo = [{ text: '' }];
   s.firstRole = doc.firstRole === 'me' ? 'me' : 'them';
-  s.convoCollapsed = doc.convoCollapsed === true;
 
   if (Array.isArray(doc.chat)) {
     s.chat = doc.chat.map((m) => {
@@ -344,7 +343,43 @@ export function getSession() {
 
   if (typeof doc.inputDraft === 'string') s.inputDraft = doc.inputDraft;
   else if (typeof doc.opinion === 'string') s.inputDraft = doc.opinion; // 表单版的「我的看法」
+
+  if (doc.convoMode !== 'delta') migrateSnapshotsToDeltas(s);
   return s;
+}
+
+/**
+ * 全量快照版会话 → 增量版：
+ * user 轮的 convo 从"截至当轮的完整记录"裁成"该轮新增"；
+ * 粘贴框工作区裁掉已发送过的部分，只留未发送的尾巴。
+ */
+function migrateSnapshotsToDeltas(s) {
+  let prev = [];
+  for (const m of s.chat) {
+    if (m.role !== 'user' || !m.convo) continue;
+    const full = m.convo;
+    const isPrefix = prev.length <= full.length
+      && prev.every((x, i) => x.role === full[i].role && x.text === full[i].text);
+    const delta = isPrefix ? full.slice(prev.length) : full;
+    prev = full;
+    m.convo = delta.length ? delta : null;
+  }
+  s.chat = s.chat.filter((m) => m.role !== 'user' || m.text.trim() || (m.convo && m.convo.length));
+
+  const other = s.firstRole === 'them' ? 'me' : 'them';
+  const collected = s.convo
+    .map((m, i) => ({ role: i % 2 === 0 ? s.firstRole : other, text: (m.text || '').trim() }))
+    .filter((x) => x.text);
+  const tail = collected.slice(prev.length);
+  if (tail.length) {
+    s.convo = tail.map((x) => ({ text: x.text }));
+    s.firstRole = tail[0].role;
+  } else {
+    s.convo = [{ text: '' }];
+    if (prev.length) {
+      s.firstRole = prev[prev.length - 1].role === 'them' ? 'me' : 'them';
+    }
+  }
 }
 
 export function saveSession(session) {
