@@ -470,7 +470,15 @@ textarea:focus, input:focus { border-color: var(--green); }
 .settings-row .row-label { font-size: 15px; }
 .settings-row .row-value { font-size: 13px; color: var(--text-2); }
 .settings-row .row-btns { display: flex; gap: 8px; }
-.settings-row input { flex: 1; min-width: 140px; }
+.settings-row input,
+.settings-row select { flex: 1; min-width: 140px; }
+.settings-row select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--card);
+  min-height: 44px;
+}
 
 .empty-hint { font-size: 14px; color: var(--text-2); padding: 8px 2px; }
 

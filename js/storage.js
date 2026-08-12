@@ -12,7 +12,13 @@ const KEYS = {
 };
 
 const SCHEMA_VERSION = 1;
-export const DEFAULT_MODEL = 'claude-sonnet-4-6';
+
+/** 默认服务商：DeepSeek（国内可直接支付、浏览器可直连、便宜） */
+export const DEFAULT_SETTINGS = {
+  provider: 'openai',                    // 协议：'openai' | 'anthropic'
+  baseUrl: 'https://api.deepseek.com',
+  model: 'deepseek-chat',
+};
 
 export class StorageFullError extends Error {
   constructor() {
@@ -257,18 +263,28 @@ export function resolvePersona(ref) {
 
 export function getSettings() {
   const doc = read(KEYS.settings, {});
+  // 旧版本只存了 model（Anthropic 时代）的兼容
+  if (!doc.provider && doc.model && String(doc.model).startsWith('claude')) {
+    return {
+      apiKey: doc.apiKey || '',
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      model: doc.model,
+    };
+  }
   return {
     apiKey: doc.apiKey || '',
-    model: doc.model || DEFAULT_MODEL,
+    provider: doc.provider || DEFAULT_SETTINGS.provider,
+    baseUrl: doc.baseUrl !== undefined ? doc.baseUrl : DEFAULT_SETTINGS.baseUrl,
+    model: doc.model !== undefined ? doc.model : DEFAULT_SETTINGS.model,
   };
 }
 
 export function updateSettings(patch) {
   const cur = getSettings();
   const next = { schemaVersion: SCHEMA_VERSION, ...cur, ...patch };
-  if (!next.model || !String(next.model).trim()) next.model = DEFAULT_MODEL;
   write(KEYS.settings, next);
-  return { apiKey: next.apiKey, model: next.model };
+  return getSettings();
 }
 
 /* ---------- 会话草稿 ---------- */
@@ -313,13 +329,14 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /** 导出全部数据（明确不含 apiKey） */
 export function exportData() {
+  const { provider, baseUrl, model } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
     profiles: listProfiles(),
     presets: listPresets(),
-    settings: { model: getSettings().model },
+    settings: { provider, baseUrl, model },
   };
 }
 
@@ -348,8 +365,12 @@ export function buildImportPreview(parsed) {
 export function importData(parsed) {
   writeProfiles({ schemaVersion: SCHEMA_VERSION, items: parsed.profiles });
   writePresets({ schemaVersion: SCHEMA_VERSION, items: parsed.presets });
-  if (parsed.settings && parsed.settings.model) {
-    updateSettings({ model: parsed.settings.model });
+  if (parsed.settings && typeof parsed.settings === 'object') {
+    const patch = {};
+    for (const k of ['provider', 'baseUrl', 'model']) {
+      if (typeof parsed.settings[k] === 'string') patch[k] = parsed.settings[k];
+    }
+    if (Object.keys(patch).length) updateSettings(patch);
   }
   // 会话草稿里选中的人物可能已不存在，交由 resolvePersona 兜底，无需清空草稿
 }

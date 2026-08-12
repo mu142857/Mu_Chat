@@ -1,5 +1,5 @@
 /**
- * api.js — 浏览器直连 Anthropic API。
+ * api.js — 浏览器直连大模型 API（Anthropic 协议 + OpenAI 兼容协议）。
  * 只依赖 prompts.js；输入纯数据，输出结构化结果或类型化错误，不碰 DOM 和 storage。
  */
 
@@ -10,8 +10,23 @@ import {
   buildSummaryUserMessage,
 } from './prompts.js';
 
-const API_URL = 'https://api.anthropic.com/v1/messages';
 const TIMEOUT_MS = 60_000;
+
+/**
+ * 服务商预设。protocol 决定请求格式：
+ * - 'openai'    → POST {baseUrl}/chat/completions，Authorization: Bearer
+ * - 'anthropic' → POST {baseUrl}/v1/messages，x-api-key + 浏览器直连头
+ * 注意：豆包（火山方舟）不允许浏览器跨域，纯前端应用无法直连，故不在列表中。
+ */
+export const PROVIDER_PRESETS = [
+  { id: 'deepseek', name: 'DeepSeek', protocol: 'openai', baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat' },
+  { id: 'zhipu', name: '智谱 GLM', protocol: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.6' },
+  { id: 'kimi', name: 'Kimi（月之暗面）', protocol: 'openai', baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'kimi-latest' },
+  { id: 'qwen', name: '通义千问', protocol: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus' },
+  { id: 'openai', name: 'OpenAI（GPT）', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5-mini' },
+  { id: 'anthropic', name: 'Claude（Anthropic）', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-6' },
+  { id: 'custom', name: '自定义（OpenAI 兼容）', protocol: 'openai', baseUrl: '', defaultModel: '' },
+];
 
 export class ApiError extends Error {
   constructor(kind, userMessage, { retryAfter } = {}) {
@@ -24,34 +39,61 @@ export class ApiError extends Error {
 
 /* ---------- 底层调用 ---------- */
 
-async function callClaude({ system, userMessage, settings, maxTokens }) {
+async function callModel({ system, userMessage, settings, maxTokens }) {
   if (!settings.apiKey) {
     throw new ApiError('no_key', '请先设置 API Key');
   }
+  if (!settings.model || !settings.model.trim()) {
+    throw new ApiError('bad_request', '请先到设置里填写模型名称');
+  }
+  const base = (settings.baseUrl || '').replace(/\/+$/, '');
+  if (!base) {
+    throw new ApiError('bad_request', '请先到设置里填写接口地址');
+  }
 
-  let resp;
-  try {
-    resp = await fetch(API_URL, {
-      method: 'POST',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: {
+  const isAnthropic = settings.provider === 'anthropic';
+  const url = isAnthropic ? `${base}/v1/messages` : `${base}/chat/completions`;
+  const headers = isAnthropic
+    ? {
         'content-type': 'application/json',
         'x-api-key': settings.apiKey,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
+      }
+    : {
+        'content-type': 'application/json',
+        'authorization': 'Bearer ' + settings.apiKey,
+      };
+  // OpenAI 兼容协议不传输出上限：各家参数名不一致（max_tokens / max_completion_tokens），
+  // 输出本身很短，用服务商默认值即可
+  const body = isAnthropic
+    ? {
         model: settings.model,
         max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content: userMessage }],
-      }),
+      }
+    : {
+        model: settings.model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMessage },
+        ],
+      };
+
+  let resp;
+  try {
+    resp = await fetch(url, {
+      method: 'POST',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers,
+      body: JSON.stringify(body),
     });
   } catch (e) {
     if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
       throw new ApiError('timeout', '请求超时，请重试');
     }
-    throw new ApiError('network', '网络连接失败，请检查网络后重试');
+    throw new ApiError('network', '网络连接失败（或该服务商不允许浏览器直连），请检查后重试');
   }
 
   if (!resp.ok) {
@@ -62,24 +104,40 @@ async function callClaude({ system, userMessage, settings, maxTokens }) {
   try {
     data = await resp.json();
   } catch {
-    throw new ApiError('server', 'Claude 返回了无法解析的响应，请重试');
+    throw new ApiError('server', '模型返回了无法解析的响应，请重试');
   }
 
+  return isAnthropic ? extractAnthropicText(data) : extractOpenAIText(data);
+}
+
+function extractAnthropicText(data) {
   if (data.stop_reason === 'refusal') {
     throw new ApiError('refusal', '模型拒绝了这次请求，请调整内容后重试');
   }
-
   // 不盲取 content[0]：换新模型后第一块可能是 thinking block
   const text = (data.content || [])
     .filter((b) => b.type === 'text')
     .map((b) => b.text)
     .join('');
-
   if (data.stop_reason === 'max_tokens') {
     throw new ApiError('truncated', '输出被截断了，请重试');
   }
   if (!text.trim()) {
-    throw new ApiError('server', 'Claude 没有返回文本内容，请重试');
+    throw new ApiError('server', '模型没有返回文本内容，请重试');
+  }
+  return text;
+}
+
+function extractOpenAIText(data) {
+  const choice = data.choices && data.choices[0];
+  const text = choice && choice.message && typeof choice.message.content === 'string'
+    ? choice.message.content
+    : '';
+  if (choice && choice.finish_reason === 'length' && !text.trim()) {
+    throw new ApiError('truncated', '输出被截断了，请重试');
+  }
+  if (!text.trim()) {
+    throw new ApiError('server', '模型没有返回文本内容，请重试');
   }
   return text;
 }
@@ -108,7 +166,7 @@ async function classifyHttpError(resp) {
     }
     default:
       if (resp.status >= 500) {
-        return new ApiError('server', 'Claude 服务暂时不可用，请稍后重试');
+        return new ApiError('server', '模型服务暂时不可用，请稍后重试');
       }
       return new ApiError('server', `请求失败（${resp.status}）${serverMsg ? '：' + serverMsg : '，请重试'}`);
   }
@@ -143,7 +201,7 @@ function parseModelJson(text) {
  * 失败抛 ApiError
  */
 export async function generateReply({ persona, messages, opinion, settings }) {
-  const text = await callClaude({
+  const text = await callModel({
     system: buildReplySystemPrompt(),
     userMessage: buildReplyUserMessage({ persona, messages, opinion }),
     settings,
@@ -173,7 +231,7 @@ export async function generateReply({ persona, messages, opinion, settings }) {
  * 成功: {parsed:true, points:[...]}；格式兜底: {parsed:false, raw}；失败抛 ApiError
  */
 export async function summarizeConversation({ persona, messages, settings }) {
-  const text = await callClaude({
+  const text = await callModel({
     system: buildSummarySystemPrompt(),
     userMessage: buildSummaryUserMessage({ persona, messages }),
     settings,

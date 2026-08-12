@@ -4,6 +4,7 @@
 
 import * as store from './storage.js';
 import { TIER_LABELS } from './prompts.js';
+import { PROVIDER_PRESETS } from './api.js';
 import { el, showToast, confirmDialog, promptApiKey, fmtRelative } from './ui.js';
 
 let refs = {};
@@ -330,6 +331,42 @@ function renderSettingsSection() {
 
   const settings = store.getSettings();
 
+  // 服务商
+  const providerRow = el('div', 'settings-row');
+  const providerLeft = el('div');
+  providerLeft.appendChild(el('div', 'row-label', '服务商'));
+  providerLeft.appendChild(el('div', 'row-value', '切换后需设置对应的 API Key'));
+  providerRow.appendChild(providerLeft);
+  const providerSelect = el('select');
+  const matched = PROVIDER_PRESETS.find(
+    (p) => p.id !== 'custom' && p.protocol === settings.provider && p.baseUrl === settings.baseUrl,
+  );
+  const currentId = matched ? matched.id : 'custom';
+  for (const p of PROVIDER_PRESETS) {
+    const opt = el('option', '', p.name);
+    opt.value = p.id;
+    if (p.id === currentId) opt.selected = true;
+    providerSelect.appendChild(opt);
+  }
+  providerSelect.addEventListener('change', () => {
+    const preset = PROVIDER_PRESETS.find((p) => p.id === providerSelect.value);
+    if (!preset) return;
+    if (preset.id === 'custom') {
+      store.updateSettings({ provider: 'openai' });
+    } else {
+      store.updateSettings({
+        provider: preset.protocol,
+        baseUrl: preset.baseUrl,
+        model: preset.defaultModel,
+        apiKey: '',
+      });
+      showToast(`已切换到 ${preset.name}，请设置它的 API Key`, { duration: 3000 });
+    }
+    renderSettingsSection();
+  });
+  providerRow.appendChild(providerSelect);
+  section.appendChild(providerRow);
+
   // API Key
   const keyRow = el('div', 'settings-row');
   const keyLeft = el('div');
@@ -364,18 +401,34 @@ function renderSettingsSection() {
   const modelRow = el('div', 'settings-row');
   const modelLeft = el('div');
   modelLeft.appendChild(el('div', 'row-label', '模型'));
-  modelLeft.appendChild(el('div', 'row-value', `默认 ${store.DEFAULT_MODEL}`));
+  modelLeft.appendChild(el('div', 'row-value', '从服务商文档复制模型 ID'));
   modelRow.appendChild(modelLeft);
   const modelInput = el('input');
   modelInput.value = settings.model;
-  modelInput.placeholder = store.DEFAULT_MODEL;
+  modelInput.placeholder = '模型 ID';
   modelInput.addEventListener('change', () => {
     store.updateSettings({ model: modelInput.value.trim() });
-    modelInput.value = store.getSettings().model;
     showToast('已保存');
   });
   modelRow.appendChild(modelInput);
   section.appendChild(modelRow);
+
+  // 接口地址
+  const urlRow = el('div', 'settings-row');
+  const urlLeft = el('div');
+  urlLeft.appendChild(el('div', 'row-label', '接口地址'));
+  urlLeft.appendChild(el('div', 'row-value', '一般不用改，选服务商时自动填好'));
+  urlRow.appendChild(urlLeft);
+  const urlInput = el('input');
+  urlInput.value = settings.baseUrl;
+  urlInput.placeholder = 'https://…';
+  urlInput.addEventListener('change', () => {
+    store.updateSettings({ baseUrl: urlInput.value.trim() });
+    showToast('已保存');
+    renderSettingsSection();
+  });
+  urlRow.appendChild(urlInput);
+  section.appendChild(urlRow);
 
   // 导出
   const exportRow = el('div', 'settings-row');

@@ -109,7 +109,7 @@ export function promptApiKey({ message = '' } = {}) {
 
     const input = el('input');
     input.type = 'password';
-    input.placeholder = 'sk-ant-...';
+    input.placeholder = '粘贴 API Key';
     input.autocomplete = 'off';
     dialog.appendChild(input);
 

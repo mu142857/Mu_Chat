@@ -41,6 +41,19 @@ js/manage.js        档案管理页（档案/预设/设置）
 
 `storage.js` 不依赖其他模块，将来加新功能（比如素材路由）直接复用同一份档案数据。
 
-## 默认模型
+## 服务商与模型
 
-`claude-sonnet-4-6`，可在 档案页 → 设置 → 模型 里修改。
+在 档案页 → 设置 里选择服务商（会自动填好接口地址和默认模型），再填对应的 API Key：
+
+| 服务商 | 拿 Key 的地方 | 默认模型 |
+|---|---|---|
+| DeepSeek（默认） | https://platform.deepseek.com | `deepseek-chat` |
+| 智谱 GLM | https://open.bigmodel.cn | `glm-4.6` |
+| Kimi（月之暗面） | https://platform.moonshot.cn | `kimi-latest` |
+| 通义千问 | 阿里云百炼 https://bailian.console.aliyun.com | `qwen-plus` |
+| OpenAI（GPT） | https://platform.openai.com（需境外支付方式） | `gpt-5-mini` |
+| Claude（Anthropic） | https://platform.claude.com | `claude-sonnet-4-6` |
+
+也支持"自定义（OpenAI 兼容）"：填任意 OpenAI 兼容接口的地址和模型即可。
+
+注意：**豆包（火山方舟）的 API 不允许浏览器跨域**，这种纯前端应用无法直连，所以不在列表里。
