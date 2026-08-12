@@ -12,6 +12,7 @@
   --blue-bg: #eef3f8;
   --radius: 10px;
   --tab-h: 52px;
+  --composer-h: 62px; /* 实际值由 JS 按输入框高度更新 */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -65,6 +66,9 @@ textarea:focus, input:focus { border-color: var(--green); }
   margin-bottom: 12px;
 }
 .view-header h1 { font-size: 20px; font-weight: 600; }
+.header-actions { display: flex; gap: 2px; }
+
+#view-chat { padding-bottom: calc(var(--composer-h) + 10px); }
 
 .tab-bar {
   position: fixed;
@@ -171,87 +175,85 @@ textarea:focus, input:focus { border-color: var(--green); }
   line-height: 1;
 }
 
-/* ===== 对话区（交替粘贴框）===== */
-.conversation-area { display: flex; flex-direction: column; gap: 10px; }
-
-.msg-box { position: relative; }
-
-.msg-box .role-tag {
-  display: inline-block;
-  font-size: 13px;
-  padding: 2px 10px;
-  border-radius: 5px 5px 0 0;
-  margin-left: 2px;
-  user-select: none;
+/* ===== 聊天流 ===== */
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.msg-box[data-role="them"] .role-tag { background: var(--blue-bg); color: #4a6a8a; }
-.msg-box[data-role="me"]   .role-tag { background: var(--green-bg); color: var(--green-dark); }
-.msg-box .role-tag.tappable { cursor: pointer; }
-.msg-box .role-tag.tappable::after { content: " ⇄"; opacity: 0.6; }
 
-.msg-box textarea {
-  min-height: 58px;
-  border-radius: 0 8px 8px 8px;
-}
-.msg-box[data-role="them"] textarea { background: #fbfdff; }
-.msg-box[data-role="me"] textarea { background: #fbfffc; }
-
-/* ===== 我的看法 ===== */
-.opinion-block {
-  margin-top: 16px;
-  padding: 12px;
-  background: #fffbe9;
-  border: 1.5px solid #f0dfa0;
+.chat-empty {
+  background: var(--card);
+  border: 1px dashed #ccc;
   border-radius: var(--radius);
-}
-.opinion-label {
-  display: block;
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.opinion-hint { font-size: 12px; font-weight: 400; color: #b09a4a; }
-.opinion-block textarea { border-color: #ecdfae; background: #fffef8; min-height: 52px; }
-.opinion-block textarea:focus { border-color: #d9b83c; }
-
-/* ===== 结果区 ===== */
-.situation-read {
-  font-size: 14px;
+  padding: 14px 16px;
   color: var(--text-2);
-  background: #efefef;
-  border-radius: 8px;
+  font-size: 14px;
+}
+.chat-empty-title { font-size: 15px; color: var(--text); margin-bottom: 8px; }
+.chat-empty ul { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+.chat-msg.user { display: flex; justify-content: flex-end; }
+.user-bubble {
+  max-width: 88%;
+  background: var(--green-bg);
+  border: 1px solid #cdecd9;
+  border-radius: 12px 4px 12px 12px;
   padding: 8px 12px;
-  margin-bottom: 12px;
+  font-size: 15px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.candidate-card {
+.chat-msg.assistant .assistant-card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 12px;
+  padding: 12px 14px;
 }
-.candidate-head {
+
+/* 分析文字（markdown 子集） */
+.md { font-size: 15px; }
+.md p { margin: 6px 0; }
+.md p:first-child, .md .md-h:first-child { margin-top: 0; }
+.md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+.md li { margin: 2px 0; }
+.md hr { border: none; border-top: 1px solid var(--line); margin: 10px 0; }
+.md code {
+  background: #f2f2f2;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.md-h { font-weight: 600; margin: 12px 0 4px; }
+.md-h1 { font-size: 16px; }
+.md-h2 { font-size: 15px; }
+.md-h3 { font-size: 15px; color: #333; }
+.md-quote {
+  color: var(--text-2);
+  border-left: 3px solid var(--line);
+  padding-left: 10px;
+}
+
+/* 可发送消息气泡 */
+.bubble-group { margin: 10px 0; }
+.bubble-group + .bubble-group { margin-top: 12px; }
+.group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
 }
-.intent-pill {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--green-dark);
-  background: var(--green-bg);
-  border-radius: 12px;
-  padding: 2px 12px;
-}
-
 .bubble-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 8px;
 }
+.bubble-row:last-child { margin-bottom: 0; }
 .bubble {
   flex: 1;
   background: #95ec69; /* 微信发出气泡绿 */
@@ -264,33 +266,59 @@ textarea:focus, input:focus { border-color: var(--green); }
 }
 .bubble-copy { flex-shrink: 0; margin-top: 4px; }
 
-.raw-fallback {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin-bottom: 12px;
+/* 生成中 */
+.typing-note { color: var(--text-2); font-size: 14px; }
+.typing-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: var(--green);
+  border-radius: 2px;
+  vertical-align: -2px;
+  animation: blink 0.9s step-end infinite;
 }
-.raw-fallback .raw-note { font-size: 13px; color: var(--red); margin-bottom: 8px; }
-.raw-fallback pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 14px;
-  font-family: inherit;
-}
+@keyframes blink { 50% { opacity: 0; } }
 
-/* ===== 总结区 ===== */
-.summary-area { margin-top: 4px; }
-.summary-box {
+/* ===== 底部输入条 ===== */
+.composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom));
   background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 12px;
-  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  z-index: 40;
 }
-.summary-box .summary-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
-.summary-box textarea { min-height: 96px; }
-.summary-actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.composer-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.composer textarea {
+  flex: 1;
+  max-height: 132px;
+  overflow-y: auto;
+  min-height: 44px;
+}
+.btn-send {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 8px 18px;
+  background: var(--green);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+.btn-send:active { background: var(--green-dark); }
+.btn-send.stop { background: #666; }
+
+/* 总结弹窗 */
+.summary-dialog textarea { min-height: 140px; margin-bottom: 16px; }
+.summary-dialog .dialog-title { margin-bottom: 12px; }
 
 /* ===== 底部弹层 sheet（人物选择器）===== */
 .overlay {
@@ -390,7 +418,7 @@ textarea:focus, input:focus { border-color: var(--green); }
 /* ===== toast ===== */
 #toast-root {
   position: fixed;
-  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom) + 20px);
+  bottom: calc(var(--tab-h) + var(--composer-h) + env(safe-area-inset-bottom) + 20px);
   left: 0; right: 0;
   display: flex;
   flex-direction: column;

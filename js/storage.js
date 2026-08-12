@@ -293,11 +293,8 @@ function emptySession() {
   return {
     schemaVersion: SCHEMA_VERSION,
     selected: null,            // {type:'profile'|'preset', id} | null
-    firstRole: 'them',         // 第 i 框角色 = i 偶数取 firstRole，否则相反
-    messages: [{ text: '' }],
-    opinion: '',
-    lastResult: null,          // {situationRead, candidates:[{intent,messages}]} | {raw}
-    lastSummary: null,         // 可编辑总结框当前文本
+    chat: [],                  // 与参谋的对话 [{role:'user'|'assistant', content}]
+    inputDraft: '',            // 输入框未发送的草稿
     updatedAt: null,
   };
 }
@@ -305,11 +302,34 @@ function emptySession() {
 export function getSession() {
   const doc = read(KEYS.session, null);
   if (!doc) return emptySession();
-  const base = emptySession();
-  const s = { ...base, ...doc };
-  if (!Array.isArray(s.messages) || !s.messages.length) s.messages = [{ text: '' }];
-  s.messages = s.messages.map((m) => ({ text: typeof m.text === 'string' ? m.text : '' }));
-  if (s.firstRole !== 'them' && s.firstRole !== 'me') s.firstRole = 'them';
+  if (!Array.isArray(doc.chat)) return migrateFormSession(doc);
+  const s = { ...emptySession(), ...doc };
+  s.chat = s.chat
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant')
+      && typeof m.content === 'string' && m.content.trim())
+    .map((m) => ({ role: m.role, content: m.content }));
+  if (typeof s.inputDraft !== 'string') s.inputDraft = '';
+  return s;
+}
+
+/** 旧版表单式草稿（交替粘贴框 + 看法）→ 折算成一条待发送的输入，不丢内容 */
+function migrateFormSession(doc) {
+  const s = emptySession();
+  if (doc.selected && doc.selected.id) s.selected = doc.selected;
+  const lines = [];
+  if (Array.isArray(doc.messages)) {
+    const firstRole = doc.firstRole === 'me' ? 'me' : 'them';
+    doc.messages.forEach((m, i) => {
+      const text = m && typeof m.text === 'string' ? m.text.trim() : '';
+      if (!text) return;
+      const role = i % 2 === 0 ? firstRole : (firstRole === 'them' ? 'me' : 'them');
+      lines.push(`${role === 'me' ? '我' : '对方'}：${text}`);
+    });
+  }
+  if (doc.opinion && String(doc.opinion).trim()) {
+    lines.push(`我的想法：${String(doc.opinion).trim()}`);
+  }
+  s.inputDraft = lines.join('\n');
   return s;
 }
 

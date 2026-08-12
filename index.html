@@ -22,26 +22,15 @@
     <section id="view-chat" class="view">
       <header class="view-header">
         <h1>回复助手</h1>
-        <button id="btn-new-chat" class="btn-ghost" type="button">新对话</button>
+        <div class="header-actions">
+          <button id="btn-summary" class="btn-ghost" type="button">总结</button>
+          <button id="btn-new-chat" class="btn-ghost" type="button">新对话</button>
+        </div>
       </header>
 
       <div id="persona-area" class="persona-area"></div>
 
-      <div id="conversation-area" class="conversation-area"></div>
-
-      <div class="opinion-block">
-        <label for="opinion-input" class="opinion-label">
-          我的看法 <span class="opinion-hint">最高优先级，可不填</span>
-        </label>
-        <textarea id="opinion-input" rows="2"
-          placeholder="比如：我觉得该收尾了 / 我想问问他周末有没有空"></textarea>
-      </div>
-
-      <button id="btn-generate" class="btn-primary" type="button">生成回复</button>
-
-      <div id="result-area" class="result-area"></div>
-
-      <div id="summary-area" class="summary-area"></div>
+      <div id="chat-area" class="chat-area"></div>
     </section>
 
     <!-- 档案管理页 -->
@@ -55,6 +44,15 @@
     </section>
 
   </main>
+
+  <!-- 底部输入条（仅回复页显示） -->
+  <div id="composer" class="composer">
+    <div class="composer-inner">
+      <textarea id="chat-input" rows="1"
+        placeholder="贴微信对话（标注谁说的），或直接说情况…"></textarea>
+      <button id="btn-send" class="btn-send" type="button">发送</button>
+    </div>
+  </div>
 
   <!-- 底部 tab 栏 -->
   <nav class="tab-bar">

@@ -4,13 +4,13 @@
  */
 
 import {
-  buildReplySystemPrompt,
-  buildReplyUserMessage,
+  buildChatSystemPrompt,
   buildSummarySystemPrompt,
   buildSummaryUserMessage,
 } from './prompts.js';
 
-const TIMEOUT_MS = 60_000;
+const TIMEOUT_MS = 60_000;       // 非流式请求的整体超时
+const IDLE_TIMEOUT_MS = 90_000;  // 流式请求两次数据之间的最长间隔
 
 /**
  * 服务商预设。protocol 决定请求格式：
@@ -31,15 +31,15 @@ export const PROVIDER_PRESETS = [
 export class ApiError extends Error {
   constructor(kind, userMessage, { retryAfter } = {}) {
     super(userMessage);
-    this.kind = kind;             // no_key|auth|forbidden|not_found|bad_request|too_large|rate_limit|server|network|timeout|truncated|refusal
+    this.kind = kind;             // no_key|auth|forbidden|not_found|bad_request|too_large|rate_limit|server|network|timeout|truncated|refusal|aborted
     this.userMessage = userMessage;
     this.retryAfter = retryAfter;
   }
 }
 
-/* ---------- 底层调用 ---------- */
+/* ---------- 公共校验与请求参数 ---------- */
 
-async function callModel({ system, userMessage, settings, maxTokens }) {
+function validateSettings(settings) {
   if (!settings.apiKey) {
     throw new ApiError('no_key', '请先设置 API Key');
   }
@@ -50,7 +50,10 @@ async function callModel({ system, userMessage, settings, maxTokens }) {
   if (!base) {
     throw new ApiError('bad_request', '请先到设置里填写接口地址');
   }
+  return base;
+}
 
+function buildRequestParts({ base, settings, system, messages, maxTokens, stream }) {
   const isAnthropic = settings.provider === 'anthropic';
   const url = isAnthropic ? `${base}/v1/messages` : `${base}/chat/completions`;
   const headers = isAnthropic
@@ -65,21 +68,40 @@ async function callModel({ system, userMessage, settings, maxTokens }) {
         'authorization': 'Bearer ' + settings.apiKey,
       };
   // OpenAI 兼容协议不传输出上限：各家参数名不一致（max_tokens / max_completion_tokens），
-  // 输出本身很短，用服务商默认值即可
+  // 用服务商默认值即可
   const body = isAnthropic
-    ? {
-        model: settings.model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: 'user', content: userMessage }],
-      }
-    : {
-        model: settings.model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: userMessage },
-        ],
-      };
+    ? { model: settings.model, max_tokens: maxTokens, system, messages, stream }
+    : { model: settings.model, messages: [{ role: 'system', content: system }, ...messages], stream };
+  if (!stream) delete body.stream;
+  return { isAnthropic, url, headers, body };
+}
+
+/** 相邻同角色消息合并（生成失败重发时会出现连续 user，Anthropic 协议要求交替） */
+function normalizeChatMessages(chat) {
+  const out = [];
+  for (const m of chat) {
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
+    const content = String(m.content || '').trim();
+    if (!content) continue;
+    const last = out[out.length - 1];
+    if (last && last.role === role) {
+      last.content += '\n\n' + content;
+    } else {
+      out.push({ role, content });
+    }
+  }
+  return out;
+}
+
+/* ---------- 非流式调用（总结用） ---------- */
+
+async function callOnce({ system, userMessage, settings, maxTokens }) {
+  const base = validateSettings(settings);
+  const { isAnthropic, url, headers, body } = buildRequestParts({
+    base, settings, system, maxTokens,
+    messages: [{ role: 'user', content: userMessage }],
+    stream: false,
+  });
 
   let resp;
   try {
@@ -159,7 +181,7 @@ async function classifyHttpError(resp) {
     case 400:
       return new ApiError('bad_request', '请求无效：' + (serverMsg || '请检查设置'));
     case 413:
-      return new ApiError('too_large', '对话内容太长了，删掉一些早期消息再试');
+      return new ApiError('too_large', '对话内容太长了，点「新对话」开一段吧');
     case 429: {
       const retryAfter = parseInt(resp.headers.get('retry-after'), 10) || 30;
       return new ApiError('rate_limit', `请求太频繁，请 ${retryAfter} 秒后再试`, { retryAfter });
@@ -170,6 +192,183 @@ async function classifyHttpError(resp) {
       }
       return new ApiError('server', `请求失败（${resp.status}）${serverMsg ? '：' + serverMsg : '，请重试'}`);
   }
+}
+
+/* ---------- SSE 读取 ---------- */
+
+async function readSSE(resp, onData, onActivity) {
+  let buf = '';
+  let finished = false;
+
+  const handleLine = (rawLine) => {
+    if (finished) return;
+    const line = rawLine.replace(/\r$/, '');
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (!payload) return;
+    if (payload === '[DONE]') { finished = true; return; }
+    let obj;
+    try { obj = JSON.parse(payload); } catch { return; }
+    onData(obj);
+  };
+
+  const feed = (chunk, flush) => {
+    buf += chunk;
+    let idx;
+    while ((idx = buf.indexOf('\n')) !== -1) {
+      handleLine(buf.slice(0, idx));
+      buf = buf.slice(idx + 1);
+    }
+    if (flush && buf) { handleLine(buf); buf = ''; }
+  };
+
+  if (!resp.body || !resp.body.getReader) {
+    feed(await resp.text(), true);
+    return;
+  }
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (onActivity) onActivity();
+    feed(decoder.decode(value, { stream: true }));
+    if (finished) {
+      try { await reader.cancel(); } catch { /* 忽略 */ }
+      break;
+    }
+  }
+  feed(decoder.decode(), true);
+}
+
+/* ---------- 对外接口 ---------- */
+
+/**
+ * 流式生成参谋回复。
+ * onDelta(fullText) 在每次有新内容时以"目前的完整文本"回调；
+ * abortSignal 由调用方提供，用于"停止"按钮（中止后抛 kind='aborted' 的 ApiError，
+ * 调用方可用自己在 onDelta 里攒下的部分文本兜底）。
+ * 成功返回 {text, truncated}。
+ */
+export async function streamChat({ persona, chat, settings, onDelta, abortSignal }) {
+  const base = validateSettings(settings);
+  const { isAnthropic, url, headers, body } = buildRequestParts({
+    base, settings,
+    system: buildChatSystemPrompt(persona),
+    messages: normalizeChatMessages(chat),
+    maxTokens: 8192,
+    stream: true,
+  });
+
+  const ctrl = new AbortController();
+  let abortReason = '';
+  const abortAs = (reason) => { abortReason = reason; ctrl.abort(); };
+  const onUserAbort = () => abortAs('user');
+  if (abortSignal) {
+    if (abortSignal.aborted) throw new ApiError('aborted', '已停止');
+    abortSignal.addEventListener('abort', onUserAbort, { once: true });
+  }
+  let idleTimer = setTimeout(() => abortAs('timeout'), IDLE_TIMEOUT_MS);
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => abortAs('timeout'), IDLE_TIMEOUT_MS);
+  };
+
+  const abortError = () =>
+    abortReason === 'user'
+      ? new ApiError('aborted', '已停止')
+      : new ApiError('timeout', '模型响应超时，请重试');
+
+  try {
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      if (ctrl.signal.aborted) throw abortError();
+      throw new ApiError('network', '网络连接失败（或该服务商不允许浏览器直连），请检查后重试');
+    }
+
+    if (!resp.ok) {
+      throw await classifyHttpError(resp);
+    }
+
+    let text = '';
+    let stopReason = '';
+    let streamError = null;
+
+    const handleData = (obj) => {
+      if (streamError) return;
+      if (isAnthropic) {
+        if (obj.type === 'content_block_delta' && obj.delta && obj.delta.type === 'text_delta') {
+          text += obj.delta.text;
+          if (onDelta) onDelta(text);
+        } else if (obj.type === 'message_delta' && obj.delta && obj.delta.stop_reason) {
+          stopReason = obj.delta.stop_reason;
+        } else if (obj.type === 'error') {
+          streamError = new ApiError('server',
+            '模型服务出错：' + ((obj.error && obj.error.message) || '请重试'));
+        }
+      } else {
+        if (obj.error) {
+          streamError = new ApiError('server',
+            '模型服务出错：' + (obj.error.message || '请重试'));
+          return;
+        }
+        const choice = obj.choices && obj.choices[0];
+        if (!choice) return;
+        const delta = choice.delta && choice.delta.content;
+        if (typeof delta === 'string' && delta) {
+          text += delta;
+          if (onDelta) onDelta(text);
+        }
+        if (choice.finish_reason) stopReason = choice.finish_reason;
+      }
+    };
+
+    try {
+      await readSSE(resp, handleData, resetIdle);
+    } catch (e) {
+      if (ctrl.signal.aborted) throw abortError();
+      throw new ApiError('network', '连接中断，请重试');
+    }
+
+    if (streamError) throw streamError;
+    if (stopReason === 'refusal') {
+      throw new ApiError('refusal', '模型拒绝了这次请求，请调整内容后重试');
+    }
+    if (!text.trim()) {
+      throw new ApiError('server', '模型没有返回文本内容，请重试');
+    }
+    return { text, truncated: stopReason === 'max_tokens' || stopReason === 'length' };
+  } finally {
+    clearTimeout(idleTimer);
+    if (abortSignal) abortSignal.removeEventListener('abort', onUserAbort);
+  }
+}
+
+/**
+ * 总结咨询对话为要点。
+ * 成功: {parsed:true, points:[...]}；格式兜底: {parsed:false, raw}；失败抛 ApiError
+ */
+export async function summarizeConversation({ persona, chat, settings }) {
+  const text = await callOnce({
+    system: buildSummarySystemPrompt(),
+    userMessage: buildSummaryUserMessage({ persona, chat }),
+    settings,
+    maxTokens: 2048,
+  });
+
+  const obj = parseModelJson(text);
+  if (obj && Array.isArray(obj.points)) {
+    const points = obj.points.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim());
+    if (points.length) return { parsed: true, points };
+  }
+  return { parsed: false, raw: text };
 }
 
 /* ---------- JSON 解析兜底链 ---------- */
@@ -190,58 +389,4 @@ function parseModelJson(text) {
     try { return JSON.parse(t.slice(start, end + 1)); } catch { /* 继续 */ }
   }
   return null;
-}
-
-/* ---------- 对外接口 ---------- */
-
-/**
- * 生成回复候选。
- * 成功: {parsed:true, situationRead, candidates:[{intent, messages:[...]}]}
- * 格式兜底: {parsed:false, raw}
- * 失败抛 ApiError
- */
-export async function generateReply({ persona, messages, opinion, settings }) {
-  const text = await callModel({
-    system: buildReplySystemPrompt(),
-    userMessage: buildReplyUserMessage({ persona, messages, opinion }),
-    settings,
-    maxTokens: 4096,
-  });
-
-  const obj = parseModelJson(text);
-  if (!obj) return { parsed: false, raw: text };
-
-  const situationRead = typeof obj.situation_read === 'string' ? obj.situation_read : '';
-  const rawCandidates = Array.isArray(obj.candidates) ? obj.candidates : [];
-  const candidates = rawCandidates
-    .map((c) => ({
-      intent: typeof c.intent === 'string' && c.intent.trim() ? c.intent.trim() : '候选',
-      messages: Array.isArray(c.messages)
-        ? c.messages.filter((m) => typeof m === 'string' && m.trim()).map((m) => m.trim())
-        : [],
-    }))
-    .filter((c) => c.messages.length > 0);
-
-  if (!candidates.length) return { parsed: false, raw: text };
-  return { parsed: true, situationRead, candidates };
-}
-
-/**
- * 总结对话为要点。
- * 成功: {parsed:true, points:[...]}；格式兜底: {parsed:false, raw}；失败抛 ApiError
- */
-export async function summarizeConversation({ persona, messages, settings }) {
-  const text = await callModel({
-    system: buildSummarySystemPrompt(),
-    userMessage: buildSummaryUserMessage({ persona, messages }),
-    settings,
-    maxTokens: 2048,
-  });
-
-  const obj = parseModelJson(text);
-  if (obj && Array.isArray(obj.points)) {
-    const points = obj.points.filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim());
-    if (points.length) return { parsed: true, points };
-  }
-  return { parsed: false, raw: text };
 }

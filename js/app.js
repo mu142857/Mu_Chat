@@ -17,6 +17,7 @@ const views = {
   manage: document.getElementById('view-manage'),
 };
 const tabBtns = document.querySelectorAll('.tab-btn');
+const composer = document.getElementById('composer');
 
 tabBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -24,6 +25,7 @@ tabBtns.forEach((btn) => {
     for (const [name, view] of Object.entries(views)) {
       view.hidden = name !== target;
     }
+    composer.hidden = target !== 'chat';
     tabBtns.forEach((b) => b.classList.toggle('active', b === btn));
     window.scrollTo({ top: 0 });
   });
