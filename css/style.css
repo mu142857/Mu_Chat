@@ -175,6 +175,42 @@ textarea:focus, input:focus { border-color: var(--green); }
   line-height: 1;
 }
 
+/* ===== 对话记录工作区（交替粘贴框）===== */
+.convo-block { margin-bottom: 14px; }
+
+.convo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.convo-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.convo-count { font-weight: 400; color: var(--text-2); font-size: 13px; }
+
+.conversation-area { display: flex; flex-direction: column; gap: 10px; }
+
+.msg-box { position: relative; }
+
+.msg-box .role-tag {
+  display: inline-block;
+  font-size: 13px;
+  padding: 2px 10px;
+  border-radius: 5px 5px 0 0;
+  margin-left: 2px;
+  user-select: none;
+}
+.msg-box[data-role="them"] .role-tag { background: var(--blue-bg); color: #4a6a8a; }
+.msg-box[data-role="me"]   .role-tag { background: var(--green-bg); color: var(--green-dark); }
+.msg-box .role-tag.tappable { cursor: pointer; }
+.msg-box .role-tag.tappable::after { content: " ⇄"; opacity: 0.6; }
+
+.msg-box textarea {
+  min-height: 58px;
+  border-radius: 0 8px 8px 8px;
+}
+.msg-box[data-role="them"] textarea { background: #fbfdff; }
+.msg-box[data-role="me"] textarea { background: #fbfffc; }
+
 /* ===== 聊天流 ===== */
 .chat-area {
   display: flex;
@@ -194,8 +230,15 @@ textarea:focus, input:focus { border-color: var(--green); }
 .chat-empty ul { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 
 .chat-msg.user { display: flex; justify-content: flex-end; }
-.user-bubble {
+.user-wrap {
   max-width: 88%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.user-attach { font-size: 12px; color: var(--text-2); }
+.user-bubble {
   background: var(--green-bg);
   border: 1px solid #cdecd9;
   border-radius: 12px 4px 12px 12px;
@@ -204,6 +247,7 @@ textarea:focus, input:focus { border-color: var(--green); }
   white-space: pre-wrap;
   word-break: break-word;
 }
+.user-bubble.muted { color: var(--text-2); font-size: 14px; }
 
 .chat-msg.assistant .assistant-card {
   background: var(--card);

@@ -1,6 +1,7 @@
 /**
- * chat.js — 主界面（回复助手）视图：与参谋的连续对话。
- * 读 storage → 渲染 → 事件 → 写回 storage / 调 api。
+ * chat.js — 主界面（回复助手）视图。
+ * 上方：对话记录工作区（对方/我 交替粘贴框，可随时补贴新消息）；
+ * 下方：与参谋的连续对话流。每轮发送 = 最新对话记录快照 + 你的话 + 全部历史上下文。
  */
 
 import * as store from './storage.js';
@@ -37,11 +38,28 @@ function persist() {
   }
 }
 
+/* ---------- 角色计算 ---------- */
+
+function roleAt(index) {
+  const other = session.firstRole === 'them' ? 'me' : 'them';
+  return index % 2 === 0 ? session.firstRole : other;
+}
+
+/** 当前粘贴框内容 → [{role:'them'|'me', text}]（已过滤空框） */
+function collectConvo() {
+  return session.convo
+    .map((m, i) => ({ role: roleAt(i), text: m.text.trim() }))
+    .filter((m) => m.text);
+}
+
 /* ---------- 初始化 ---------- */
 
 export function initChatView() {
   refs = {
     personaArea: document.getElementById('persona-area'),
+    conversationArea: document.getElementById('conversation-area'),
+    convoCount: document.getElementById('convo-count'),
+    btnConvoToggle: document.getElementById('btn-convo-toggle'),
     chatArea: document.getElementById('chat-area'),
     input: document.getElementById('chat-input'),
     btnSend: document.getElementById('btn-send'),
@@ -55,7 +73,7 @@ export function initChatView() {
   refs.input.value = session.inputDraft || '';
   refs.input.addEventListener('input', () => {
     session.inputDraft = refs.input.value;
-    autogrow(refs.input);
+    autogrow(refs.input, 132);
     scheduleSave();
   });
   refs.input.addEventListener('keydown', (e) => {
@@ -68,6 +86,11 @@ export function initChatView() {
   refs.btnSend.addEventListener('click', onSend);
   refs.btnSummary.addEventListener('click', onSummarize);
   refs.btnNewChat.addEventListener('click', onNewChat);
+  refs.btnConvoToggle.addEventListener('click', () => {
+    session.convoCollapsed = !session.convoCollapsed;
+    scheduleSave();
+    renderConvoState();
+  });
 
   // 输入框高度变化时同步页面底部留白
   if (typeof ResizeObserver !== 'undefined') {
@@ -88,9 +111,14 @@ export function initChatView() {
     renderPersona();
   });
 
+  renderAll();
+  requestAnimationFrame(() => autogrow(refs.input, 132));
+}
+
+function renderAll() {
   renderPersona();
+  renderConversation();
   renderChat();
-  requestAnimationFrame(() => autogrow(refs.input));
 }
 
 /* ---------- 人物选择区 ---------- */
@@ -147,12 +175,94 @@ function openPicker() {
   });
 }
 
-/* ---------- 聊天区渲染 ---------- */
+/* ---------- 对话记录工作区（交替粘贴框） ---------- */
 
-function autogrow(ta) {
+function autogrow(ta, cap) {
   ta.style.height = 'auto';
-  ta.style.height = Math.min(ta.scrollHeight, 132) + 'px';
+  const h = cap ? Math.min(ta.scrollHeight, cap) : ta.scrollHeight;
+  ta.style.height = h + 'px';
 }
+
+function renderConversation() {
+  refs.conversationArea.innerHTML = '';
+  session.convo.forEach((_, i) => {
+    refs.conversationArea.appendChild(createMsgBox(i));
+  });
+  updateRoleTags();
+  renderConvoState();
+}
+
+function createMsgBox(index) {
+  const box = el('div', 'msg-box');
+  box.dataset.index = String(index);
+
+  const tag = el('span', 'role-tag');
+  if (index === 0) {
+    tag.classList.add('tappable');
+    tag.title = '点击切换 对方/我';
+    tag.addEventListener('click', () => {
+      session.firstRole = session.firstRole === 'them' ? 'me' : 'them';
+      updateRoleTags();
+      scheduleSave();
+    });
+  }
+  box.appendChild(tag);
+
+  const ta = el('textarea');
+  ta.rows = 2;
+  ta.value = session.convo[index].text;
+  ta.addEventListener('input', () => {
+    session.convo[index].text = ta.value;
+    autogrow(ta);
+    maybeAppendBox();
+    renderConvoState();
+    scheduleSave();
+  });
+  ta.addEventListener('focus', () => {
+    setTimeout(() => ta.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250);
+  });
+  box.appendChild(ta);
+
+  requestAnimationFrame(() => autogrow(ta));
+  return box;
+}
+
+function updateRoleTags() {
+  const boxes = refs.conversationArea.querySelectorAll('.msg-box');
+  boxes.forEach((box, i) => {
+    const role = roleAt(i);
+    box.dataset.role = role;
+    const tag = box.querySelector('.role-tag');
+    tag.textContent = role === 'them' ? '对方' : '我';
+    if (i === 0 && !session.convo.slice(1).length) {
+      // 仅一个框时占位提示更明确
+      box.querySelector('textarea').placeholder = '粘贴消息内容（同一人连发多条可合并粘在一起）';
+    }
+  });
+}
+
+function maybeAppendBox() {
+  const n = session.convo.length;
+  const lastTwoFilled =
+    n >= 2
+      ? session.convo[n - 1].text.trim() && session.convo[n - 2].text.trim()
+      : session.convo[n - 1].text.trim();
+  if (lastTwoFilled) {
+    session.convo.push({ text: '' });
+    refs.conversationArea.appendChild(createMsgBox(session.convo.length - 1));
+    updateRoleTags();
+  }
+}
+
+/** 收起/展开状态与条数标签 */
+function renderConvoState() {
+  const count = collectConvo().length;
+  refs.convoCount.textContent = count ? `· ${count} 条` : '';
+  refs.conversationArea.hidden = session.convoCollapsed;
+  refs.btnConvoToggle.textContent = session.convoCollapsed ? '展开' : '收起';
+}
+
+/* ---------- 聊天流渲染 ---------- */
 
 function scrollToBottom() {
   window.scrollTo({ top: document.body.scrollHeight });
@@ -172,13 +282,13 @@ function renderChat() {
 
 function buildEmptyHint() {
   const card = el('div', 'chat-empty');
-  card.appendChild(el('div', 'chat-empty-title', '👋 把微信聊天贴进来，我帮你分析局面、写回复'));
+  card.appendChild(el('div', 'chat-empty-title', '👋 把微信聊天贴进上方的框里，我帮你分析局面、写回复'));
   const ul = el('ul');
   for (const tip of [
-    '贴对话时标一下谁说的，比如「对方：…」「我：…」，转述情况也行',
-    '想怎么回、有什么顾虑，直接说，你的意图优先',
-    '生成之后可以一直聊下去：贴对方的新回复、让我改语气、追问策略',
-    '上方选择对象后，回复会按 TA 的档案拿捏口吻和分寸',
+    '一个框贴一个人的话，对方我交替；同一人连发多条合并贴一个框。第一框的「对方/我」标签可点击切换',
+    '下面这个输入框写你的想法、要求（也可以不写，直接点发送）',
+    '生成后可以一直聊：对方回了就把新消息补贴到上方框里再发送，或者直接说「改轻松点」「接下来怎么办」',
+    '选择对象后，回复会按 TA 的档案拿捏口吻和分寸',
   ]) {
     ul.appendChild(el('li', '', tip));
   }
@@ -189,7 +299,16 @@ function buildEmptyHint() {
 function buildMessageEl(msg) {
   if (msg.role === 'user') {
     const row = el('div', 'chat-msg user');
-    row.appendChild(el('div', 'user-bubble', msg.content));
+    const wrap = el('div', 'user-wrap');
+    if (msg.convo) {
+      wrap.appendChild(el('div', 'user-attach', `📎 对话记录 ${msg.convo.length} 条`));
+    }
+    if (msg.text && msg.text.trim()) {
+      wrap.appendChild(el('div', 'user-bubble', msg.text));
+    } else {
+      wrap.appendChild(el('div', 'user-bubble muted', '（更新了对话记录，接着出主意）'));
+    }
+    row.appendChild(wrap);
     return row;
   }
   const row = el('div', 'chat-msg assistant');
@@ -256,6 +375,36 @@ function buildBubbleGroup(run) {
   return group;
 }
 
+/* ---------- 组装发给模型的消息 ---------- */
+
+/** 最近一次随消息发出的对话记录快照 */
+function lastSentSnapshot() {
+  for (let i = session.chat.length - 1; i >= 0; i--) {
+    const m = session.chat[i];
+    if (m.role === 'user' && m.convo) return m.convo;
+  }
+  return null;
+}
+
+function apiUserContent(m) {
+  const parts = [];
+  if (m.convo && m.convo.length) {
+    parts.push('【当前对话记录·完整版】\n'
+      + m.convo.map((x) => `${x.role === 'me' ? '我' : '对方'}：${x.text}`).join('\n'));
+  }
+  if (m.text && m.text.trim()) {
+    parts.push(m.convo && m.convo.length ? `【我说】\n${m.text.trim()}` : m.text.trim());
+  }
+  if (!parts.length) parts.push('（请根据对话记录继续）');
+  return parts.join('\n\n');
+}
+
+function buildApiChat() {
+  return session.chat.map((m) => (m.role === 'assistant'
+    ? { role: 'assistant', content: m.content }
+    : { role: 'user', content: apiUserContent(m) }));
+}
+
 /* ---------- 发送与生成 ---------- */
 
 /** 确保有 key；没有就弹输入框。返回可用 settings 或 null（用户取消） */
@@ -284,17 +433,27 @@ async function onSend() {
     return;
   }
   const text = refs.input.value.trim();
-  if (!text) {
-    showToast('先输入内容');
+  const convoNow = collectConvo();
+  if (!text && !convoNow.length) {
+    showToast('先在上方贴对话，或在这里写点内容');
     return;
   }
+
+  // 对话记录跟上次发出的一样就不重复附带
+  const prev = lastSentSnapshot() || [];
+  const changed = JSON.stringify(convoNow) !== JSON.stringify(prev);
+  if (!text && !changed) {
+    showToast('对话记录没有新内容，补贴新消息或写点想法');
+    return;
+  }
+
   const settings = await ensureSettings();
   if (!settings) return;
 
-  session.chat.push({ role: 'user', content: text });
+  session.chat.push({ role: 'user', text, convo: changed && convoNow.length ? convoNow : null });
   session.inputDraft = '';
   refs.input.value = '';
-  autogrow(refs.input);
+  autogrow(refs.input, 132);
   persist();
   renderChat();
 
@@ -330,7 +489,7 @@ async function generate() {
   };
 
   const doCall = () => streamChat({
-    persona, chat: session.chat, settings, onDelta,
+    persona, chat: buildApiChat(), settings, onDelta,
     abortSignal: abortCtrl.signal,
   });
 
@@ -391,7 +550,7 @@ async function onSummarize() {
     showToast('等本条生成完再总结');
     return;
   }
-  if (!session.chat.length) {
+  if (!session.chat.length && !collectConvo().length) {
     showToast('还没有对话内容');
     return;
   }
@@ -403,17 +562,29 @@ async function onSummarize() {
   btn.disabled = true;
   btn.textContent = '总结中…';
 
+  // 粘贴框里有还没发送过的内容时，也一并纳入总结
+  const chatForSummary = buildApiChat();
+  const convoNow = collectConvo();
+  const prev = lastSentSnapshot() || [];
+  if (convoNow.length && JSON.stringify(convoNow) !== JSON.stringify(prev)) {
+    chatForSummary.push({
+      role: 'user',
+      content: '【当前对话记录·完整版】\n'
+        + convoNow.map((x) => `${x.role === 'me' ? '我' : '对方'}：${x.text}`).join('\n'),
+    });
+  }
+
   try {
     let result;
     try {
-      result = await summarizeConversation({ persona, chat: session.chat, settings });
+      result = await summarizeConversation({ persona, chat: chatForSummary, settings });
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'auth') {
         const key = await promptApiKey({ message: 'API Key 无效或已被撤销，请重新输入。' });
         if (!key) return;
         store.updateSettings({ apiKey: key });
         settings = store.getSettings();
-        result = await summarizeConversation({ persona, chat: session.chat, settings });
+        result = await summarizeConversation({ persona, chat: chatForSummary, settings });
       } else {
         throw e;
       }
@@ -507,9 +678,8 @@ function onAppendToProfile(profileId, text, closeDialog) {
 function resetSession() {
   session = store.clearSessionDraft({ keepSelection: true });
   refs.input.value = '';
-  autogrow(refs.input);
-  renderPersona();
-  renderChat();
+  autogrow(refs.input, 132);
+  renderAll();
   window.scrollTo({ top: 0 });
 }
 
@@ -518,11 +688,11 @@ async function onNewChat() {
     showToast('先点「停止」再开新对话');
     return;
   }
-  const hasContent = session.chat.length || refs.input.value.trim();
+  const hasContent = session.chat.length || collectConvo().length || refs.input.value.trim();
   if (hasContent) {
     const yes = await confirmDialog({
       title: '开始新对话？',
-      body: '当前对话会被清空（保留已选人物）。',
+      body: '上方对话记录和生成结果都会被清空（保留已选人物）。',
       confirmText: '清空',
       danger: true,
     });

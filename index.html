@@ -30,6 +30,14 @@
 
       <div id="persona-area" class="persona-area"></div>
 
+      <div class="convo-block">
+        <div class="convo-head">
+          <span class="convo-title">对话记录 <span id="convo-count" class="convo-count"></span></span>
+          <button id="btn-convo-toggle" class="btn-small" type="button">收起</button>
+        </div>
+        <div id="conversation-area" class="conversation-area"></div>
+      </div>
+
       <div id="chat-area" class="chat-area"></div>
     </section>
 
@@ -49,7 +57,7 @@
   <div id="composer" class="composer">
     <div class="composer-inner">
       <textarea id="chat-input" rows="1"
-        placeholder="贴微信对话（标注谁说的），或直接说情况…"></textarea>
+        placeholder="你的想法 / 追问 / 要求…（上方贴好对话可直接发）"></textarea>
       <button id="btn-send" class="btn-send" type="button">发送</button>
     </div>
   </div>

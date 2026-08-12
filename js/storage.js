@@ -293,7 +293,12 @@ function emptySession() {
   return {
     schemaVersion: SCHEMA_VERSION,
     selected: null,            // {type:'profile'|'preset', id} | null
-    chat: [],                  // 与参谋的对话 [{role:'user'|'assistant', content}]
+    firstRole: 'them',         // 粘贴框第 i 框角色 = i 偶数取 firstRole，否则相反
+    convo: [{ text: '' }],     // 对话记录工作区（交替粘贴框）
+    convoCollapsed: false,     // 工作区是否收起
+    // 与参谋的对话。user 轮: {role:'user', text, convo:[{role:'them'|'me',text}]|null}
+    // convo 是发送当时的对话记录快照（与上一次相同则为 null）；assistant 轮: {role, content}
+    chat: [],
     inputDraft: '',            // 输入框未发送的草稿
     updatedAt: null,
   };
@@ -302,34 +307,43 @@ function emptySession() {
 export function getSession() {
   const doc = read(KEYS.session, null);
   if (!doc) return emptySession();
-  if (!Array.isArray(doc.chat)) return migrateFormSession(doc);
-  const s = { ...emptySession(), ...doc };
-  s.chat = s.chat
-    .filter((m) => m && (m.role === 'user' || m.role === 'assistant')
-      && typeof m.content === 'string' && m.content.trim())
-    .map((m) => ({ role: m.role, content: m.content }));
-  if (typeof s.inputDraft !== 'string') s.inputDraft = '';
-  return s;
-}
-
-/** 旧版表单式草稿（交替粘贴框 + 看法）→ 折算成一条待发送的输入，不丢内容 */
-function migrateFormSession(doc) {
   const s = emptySession();
   if (doc.selected && doc.selected.id) s.selected = doc.selected;
-  const lines = [];
-  if (Array.isArray(doc.messages)) {
-    const firstRole = doc.firstRole === 'me' ? 'me' : 'them';
-    doc.messages.forEach((m, i) => {
-      const text = m && typeof m.text === 'string' ? m.text.trim() : '';
-      if (!text) return;
-      const role = i % 2 === 0 ? firstRole : (firstRole === 'them' ? 'me' : 'them');
-      lines.push(`${role === 'me' ? '我' : '对方'}：${text}`);
-    });
+
+  // 粘贴框工作区：当前版的 convo，或最初表单版的 messages
+  const boxes = Array.isArray(doc.convo) ? doc.convo
+    : (Array.isArray(doc.messages) ? doc.messages : null);
+  if (boxes) {
+    s.convo = boxes.map((m) => ({ text: m && typeof m.text === 'string' ? m.text : '' }));
   }
-  if (doc.opinion && String(doc.opinion).trim()) {
-    lines.push(`我的想法：${String(doc.opinion).trim()}`);
+  if (!s.convo.length) s.convo = [{ text: '' }];
+  s.firstRole = doc.firstRole === 'me' ? 'me' : 'them';
+  s.convoCollapsed = doc.convoCollapsed === true;
+
+  if (Array.isArray(doc.chat)) {
+    s.chat = doc.chat.map((m) => {
+      if (!m) return null;
+      if (m.role === 'assistant') {
+        return typeof m.content === 'string' && m.content.trim()
+          ? { role: 'assistant', content: m.content } : null;
+      }
+      if (m.role !== 'user') return null;
+      // 纯聊天版的 user 轮存在 content 里，折算成 text
+      const text = typeof m.text === 'string' ? m.text
+        : (typeof m.content === 'string' ? m.content : '');
+      const convo = Array.isArray(m.convo)
+        ? m.convo
+          .filter((x) => x && (x.role === 'them' || x.role === 'me')
+            && typeof x.text === 'string' && x.text.trim())
+          .map((x) => ({ role: x.role, text: x.text }))
+        : null;
+      if (!text.trim() && !(convo && convo.length)) return null;
+      return { role: 'user', text, convo: convo && convo.length ? convo : null };
+    }).filter(Boolean);
   }
-  s.inputDraft = lines.join('\n');
+
+  if (typeof doc.inputDraft === 'string') s.inputDraft = doc.inputDraft;
+  else if (typeof doc.opinion === 'string') s.inputDraft = doc.opinion; // 表单版的「我的看法」
   return s;
 }
 
