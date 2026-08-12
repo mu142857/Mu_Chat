@@ -520,8 +520,9 @@ async function generate() {
     });
   };
 
+  const memes = store.listMemes().map((m) => m.text);
   const doCall = () => streamChat({
-    persona, chat: buildApiChat(), settings, onDelta,
+    persona, memes, chat: buildApiChat(), settings, onDelta,
     abortSignal: abortCtrl.signal,
   });
 
@@ -641,63 +642,37 @@ function openSummaryDialog(text, persona) {
   ta.value = text;
   dialog.appendChild(ta);
 
+  // 档案在本地文件里，页面写不进去：复制要点后贴进文件，或直接丢给 Claude
+  const who = persona && persona.kind === 'profile' ? `「${persona.profile.name}」` : '对应人';
+  dialog.appendChild(el('div', 'dialog-note',
+    `档案在 data/profiles.js 文件里。复制要点后贴进${who}的 notes，或把要点发给 Claude 让它归档。`));
+
   const actions = el('div', 'dialog-actions');
   const btnClose = el('button', 'dialog-cancel', '关闭');
-  const btnCopy = el('button', 'dialog-cancel', '复制');
+  const btnCopy = el('button', 'dialog-confirm', '复制要点');
   actions.appendChild(btnClose);
   actions.appendChild(btnCopy);
-  if (persona && persona.kind === 'profile') {
-    const btnAppend = el('button', 'dialog-confirm', '存入档案');
-    btnAppend.addEventListener('click', () => {
-      onAppendToProfile(persona.profile.id, ta.value, () => overlay.remove());
-    });
-    actions.appendChild(btnAppend);
-  }
   dialog.appendChild(actions);
   overlay.appendChild(dialog);
   root.appendChild(overlay);
 
   btnClose.addEventListener('click', () => overlay.remove());
   btnCopy.addEventListener('click', async () => {
-    showToast((await copyText(ta.value)) ? '已复制' : '复制失败，请长按手动复制');
+    const ok = await copyText(ta.value);
+    if (!ok) {
+      showToast('复制失败，请长按手动复制');
+      return;
+    }
+    overlay.remove();
+    const yes = await confirmDialog({
+      title: '要点已复制',
+      body: '是否清空当前对话，开始下一段？（保留已选人物）',
+      confirmText: '清空',
+      cancelText: '保留',
+    });
+    if (yes) resetSession();
   });
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-}
-
-function onAppendToProfile(profileId, text, closeDialog) {
-  const profile = store.getProfile(profileId);
-  if (!profile) {
-    showToast('档案已不存在');
-    return;
-  }
-  const lines = (text || '')
-    .split('\n')
-    .map((l) => l.replace(/^\s*[-•]\s*/, '').trim())
-    .filter(Boolean);
-  if (!lines.length) {
-    showToast('要点内容为空');
-    return;
-  }
-  try {
-    store.appendToNotes(profileId, lines);
-  } catch (e) {
-    showToast(e.userMessage || '保存失败');
-    return;
-  }
-  showToast('已存入档案');
-  closeDialog();
-  document.dispatchEvent(new CustomEvent('muchat:data-changed', { detail: { source: 'chat' } }));
-
-  confirmDialog({
-    title: '总结已存入档案',
-    body: '是否清空当前对话，开始下一段？（保留已选人物）',
-    confirmText: '清空',
-    cancelText: '保留',
-  }).then((yes) => {
-    if (yes) {
-      resetSession();
-    }
-  });
 }
 
 /* ---------- 新对话 ---------- */

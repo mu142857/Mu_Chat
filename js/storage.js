@@ -5,10 +5,13 @@
  */
 
 const KEYS = {
-  profiles: 'muchat.profiles',
+  profiles: 'muchat.profiles',      // 旧版遗留：档案已迁到 data/profiles.js 文件，此 key 只用于一次性迁移
   presets: 'muchat.presets',
   settings: 'muchat.settings',
   session: 'muchat.session',
+  memes: 'muchat.memes',
+  lastContact: 'muchat.lastContact', // {profileId: iso} 使用痕迹，不算档案内容
+  lock: 'muchat.lock',               // {salt, hash} 锁屏密码
 };
 
 const SCHEMA_VERSION = 1;
@@ -88,75 +91,134 @@ function now() {
   return new Date().toISOString();
 }
 
-/* ---------- 档案 ---------- */
+/* ---------- 档案（存本地文件 data/profiles.js，页面只读） ---------- */
 
-function readProfiles() {
-  return read(KEYS.profiles, { schemaVersion: SCHEMA_VERSION, items: [] });
-}
+let fileProfiles = [];
+let fileMemes = [];
 
-function writeProfiles(doc) {
-  write(KEYS.profiles, doc);
-}
-
-export function listProfiles() {
-  return readProfiles().items.slice();
-}
-
-export function getProfile(id) {
-  return readProfiles().items.find((p) => p.id === id) || null;
-}
-
-export function createProfile({ name, tier, interests = '', memories = '', style = '', goal = '', notes = '' }) {
-  const doc = readProfiles();
-  const profile = {
-    id: 'p_' + uuid(),
-    name: String(name || '').trim(),
-    tier: Number(tier) || 3,
-    interests, memories, style, goal, notes,
-    lastContactAt: null,
-    createdAt: now(),
-    updatedAt: now(),
-  };
-  doc.items.push(profile);
-  writeProfiles(doc);
-  return profile;
-}
-
-export function updateProfile(id, patch) {
-  const doc = readProfiles();
-  const p = doc.items.find((x) => x.id === id);
-  if (!p) return null;
-  Object.assign(p, patch, { id: p.id, updatedAt: now() });
-  writeProfiles(doc);
-  return p;
-}
-
-export function deleteProfile(id) {
-  const doc = readProfiles();
-  doc.items = doc.items.filter((x) => x.id !== id);
-  writeProfiles(doc);
-}
-
-export function touchLastContact(id, when = new Date()) {
-  return updateProfile(id, { lastContactAt: when.toISOString() });
+function cleanStr(v) {
+  return typeof v === 'string' ? v : (v == null ? '' : String(v));
 }
 
 /**
- * 把要点以日期前缀追加进自由备注。lines: string[]（不带 "- " 前缀）。
- * 总结功能与将来的素材路由沉淀素材共用这一个入口。
+ * 加载本地档案文件。文件不存在（新环境 / 线上部署）时静默降级为空档案。
+ * 必须在 app 初始化视图前 await 一次。
  */
-export function appendToNotes(id, lines, { touch = true } = {}) {
-  const p = getProfile(id);
-  if (!p) return null;
-  const clean = lines.map((l) => String(l).trim()).filter(Boolean);
-  if (!clean.length) return p;
-  const d = new Date();
-  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const block = `【${dateStr}】\n` + clean.map((l) => `- ${l}`).join('\n');
-  const notes = p.notes && p.notes.trim() ? p.notes.replace(/\s+$/, '') + '\n\n' + block : block;
-  const patch = { notes };
-  if (touch) patch.lastContactAt = now();
-  return updateProfile(id, patch);
+export async function loadLocalData() {
+  let mod = null;
+  try {
+    // 带时间戳绕开浏览器的模块缓存，保证"改完文件刷新就生效"
+    mod = await import('../data/profiles.js?t=' + Date.now());
+  } catch {
+    return;
+  }
+  const items = Array.isArray(mod.profiles) ? mod.profiles : [];
+  fileProfiles = items
+    .filter((p) => p && cleanStr(p.name).trim())
+    .map((p) => ({
+      id: 'pf_' + cleanStr(p.name).trim(),
+      name: cleanStr(p.name).trim(),
+      tier: [1, 2, 3].includes(Number(p.tier)) ? Number(p.tier) : 3,
+      interests: cleanStr(p.interests),
+      memories: cleanStr(p.memories),
+      style: cleanStr(p.style),
+      goal: cleanStr(p.goal),
+      notes: cleanStr(p.notes),
+    }));
+  fileMemes = (Array.isArray(mod.memes) ? mod.memes : [])
+    .map((t) => cleanStr(t).trim())
+    .filter(Boolean);
+}
+
+export function listProfiles() {
+  const lc = read(KEYS.lastContact, {});
+  return fileProfiles.map((p) => ({ ...p, lastContactAt: lc[p.id] || null }));
+}
+
+export function getProfile(id) {
+  return listProfiles().find((p) => p.id === id) || null;
+}
+
+export function touchLastContact(id, when = new Date()) {
+  const lc = read(KEYS.lastContact, {});
+  lc[id] = when.toISOString();
+  write(KEYS.lastContact, lc);
+}
+
+/* 旧版档案存在 localStorage 里，只留读取和清除两个口子给迁移用 */
+
+export function listLegacyProfiles() {
+  const doc = read(KEYS.profiles, { items: [] });
+  return Array.isArray(doc.items) ? doc.items : [];
+}
+
+export function clearLegacyProfiles() {
+  rawRemove(KEYS.profiles);
+}
+
+/* ---------- 梗库（文件里的 + 页面随手存的） ---------- */
+
+function readMemes() {
+  return read(KEYS.memes, { schemaVersion: SCHEMA_VERSION, items: [] });
+}
+
+/** 文件版排前面（不可在页面删除），localStorage 版排后面 */
+export function listMemes() {
+  const local = readMemes().items || [];
+  return [
+    ...fileMemes.map((text, i) => ({ id: 'mf_' + i, text, fromFile: true })),
+    ...local,
+  ];
+}
+
+export function addMeme(text) {
+  const t = cleanStr(text).trim();
+  if (!t) return null;
+  const doc = readMemes();
+  const meme = { id: 'm_' + uuid(), text: t, createdAt: now() };
+  doc.items.push(meme);
+  write(KEYS.memes, doc);
+  return meme;
+}
+
+export function deleteMeme(id) {
+  const doc = readMemes();
+  doc.items = doc.items.filter((m) => m.id !== id);
+  write(KEYS.memes, doc);
+}
+
+/* ---------- 锁屏（挡一下顺手翻看的门帘，不是加密） ---------- */
+
+async function hashPassword(salt, password) {
+  const data = salt + '::' + password;
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // 非安全上下文没有 subtle，退化为简单散列（锁屏本来就只防顺手翻看）
+  let h = 0;
+  for (let i = 0; i < data.length; i++) h = (h * 31 + data.charCodeAt(i)) | 0;
+  return 'x' + (h >>> 0).toString(16);
+}
+
+export function isLockEnabled() {
+  return read(KEYS.lock, null) !== null;
+}
+
+export async function setLockPassword(password) {
+  const salt = uuid();
+  const hash = await hashPassword(salt, password);
+  write(KEYS.lock, { salt, hash });
+}
+
+export function clearLock() {
+  rawRemove(KEYS.lock);
+}
+
+export async function verifyLockPassword(password) {
+  const c = read(KEYS.lock, null);
+  if (!c) return true;
+  return (await hashPassword(c.salt, password)) === c.hash;
 }
 
 /* ---------- 预设身份 ---------- */
@@ -396,15 +458,15 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /* ---------- 导入导出 / 清空 ---------- */
 
-/** 导出全部数据（明确不含 apiKey） */
+/** 导出全部数据（明确不含 apiKey；档案在 data/profiles.js 文件里，不经这里） */
 export function exportData() {
   const { provider, baseUrl, model } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
-    profiles: listProfiles(),
     presets: listPresets(),
+    memes: readMemes().items,
     settings: { provider, baseUrl, model },
   };
 }
@@ -420,20 +482,25 @@ export function buildImportPreview(parsed) {
   if (typeof parsed.schemaVersion === 'number' && parsed.schemaVersion > SCHEMA_VERSION) {
     return { ok: false, error: '备份来自更新版本的应用，请先升级本页面' };
   }
-  if (!Array.isArray(parsed.profiles) || !Array.isArray(parsed.presets)) {
-    return { ok: false, error: '备份文件缺少档案或预设数据' };
+  if (!Array.isArray(parsed.presets)) {
+    return { ok: false, error: '备份文件缺少预设数据' };
   }
+  const incomingMemes = Array.isArray(parsed.memes) ? parsed.memes.length : 0;
   return {
     ok: true,
-    current: { profiles: listProfiles().length, presets: listPresets().length },
-    incoming: { profiles: parsed.profiles.length, presets: parsed.presets.length },
+    // 旧版备份里的 profiles 不再导入（档案在 data/profiles.js 文件里）
+    hasLegacyProfiles: Array.isArray(parsed.profiles) && parsed.profiles.length > 0,
+    current: { presets: listPresets().length, memes: readMemes().items.length },
+    incoming: { presets: parsed.presets.length, memes: incomingMemes },
   };
 }
 
 /** 整体覆盖导入（调用前必须先经 buildImportPreview 校验并由用户确认） */
 export function importData(parsed) {
-  writeProfiles({ schemaVersion: SCHEMA_VERSION, items: parsed.profiles });
   writePresets({ schemaVersion: SCHEMA_VERSION, items: parsed.presets });
+  if (Array.isArray(parsed.memes)) {
+    write(KEYS.memes, { schemaVersion: SCHEMA_VERSION, items: parsed.memes });
+  }
   if (parsed.settings && typeof parsed.settings === 'object') {
     const patch = {};
     for (const k of ['provider', 'baseUrl', 'model']) {
@@ -444,7 +511,7 @@ export function importData(parsed) {
   // 会话草稿里选中的人物可能已不存在，交由 resolvePersona 兜底，无需清空草稿
 }
 
-/** 清空全部数据（含 key 与草稿） */
+/** 清空全部数据（含 key、草稿、锁屏；不动 data/profiles.js 文件） */
 export function clearAll() {
   for (const key of Object.values(KEYS)) rawRemove(key);
 }

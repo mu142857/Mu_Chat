@@ -250,11 +250,11 @@ async function readSSE(resp, onData, onActivity) {
  * 调用方可用自己在 onDelta 里攒下的部分文本兜底）。
  * 成功返回 {text, truncated}。
  */
-export async function streamChat({ persona, chat, settings, onDelta, abortSignal }) {
+export async function streamChat({ persona, memes, chat, settings, onDelta, abortSignal }) {
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings,
-    system: buildChatSystemPrompt(persona),
+    system: buildChatSystemPrompt(persona, memes),
     messages: normalizeChatMessages(chat),
     maxTokens: 8192,
     stream: true,

@@ -6,9 +6,11 @@
 - 回复里「可直接发送的消息」渲染成微信绿气泡，一键复制；连发多条自动成组，可整组复制
 
 - 零后端、零构建、零依赖：原生 HTML/CSS/JS（ES modules）
-- 所有数据（档案、预设、设置、会话草稿）存浏览器 localStorage
-- API Key 只存本机，绝不出现在代码或仓库里
-- 手机 ↔ 电脑同步：设置里「导出 JSON / 导入 JSON」（导出不含 Key）
+- **朋友档案存本地文件** `data/profiles.js`：直接编辑文件（或叫 Claude 改），刷新页面生效；该文件被 .gitignore 忽略，不会被提交或发布。新机器上把 `data/profiles.example.js` 复制为 `data/profiles.js` 起步
+- 梗库：收藏你觉得妙的梗和好句（页面里随手存，或写进档案文件的 `memes`），生成回复时随机带几条给模型当风格参考
+- 锁屏密码（可选，设置里开启）：打开页面先输密码，浏览器可记住。定位是挡顺手翻看的门帘，数据本身不加密
+- 其余数据（预设、梗库、设置、会话草稿）存浏览器 localStorage；API Key 只存本机，绝不出现在代码或仓库里
+- 手机 ↔ 电脑同步：设置里「导出 JSON / 导入 JSON」（含预设/梗库/设置，不含 Key；档案文件手动拷贝）
 
 ## 本地运行
 
@@ -26,24 +28,33 @@ python3 -m http.server 8000
 2. 仓库 Settings → Pages → Source 选 `main` 分支根目录，保存
 3. 访问 `https://<你的用户名>.github.io/<仓库名>/`，首次发送消息时输入 API Key
 
+注意：`data/profiles.js`（朋友档案）被 .gitignore 忽略，不会跟着发布——线上版没有档案，这是有意的隐私设计。
+
 手机上可以用浏览器的「添加到主屏幕」，会以独立 App 外壳全屏打开。
 
 ## 文件结构
 
 ```
-index.html          页面骨架（回复 / 档案 两个 tab + 底部输入条）
-manifest.json       PWA 壳（添加到主屏幕）
-css/style.css       样式（移动优先）
-js/storage.js       纯数据层，唯一接触 localStorage 的模块
-js/prompts.js       两套提示词（参谋对话 / 总结对话）
-js/api.js           浏览器直连大模型 API（流式 SSE + 非流式）、错误分类
-js/markdown.js      模型输出解析：markdown 子集渲染 + msg 气泡块拆分
-js/ui.js            共享组件：弹窗、toast、复制、人物选择器
-js/chat.js          主界面（聊天流、流式渲染、气泡复制、总结链路）
-js/manage.js        档案管理页（档案/预设/设置）
+index.html               页面骨架（回复 / 档案 两个 tab + 底部输入条）
+manifest.json            PWA 壳（添加到主屏幕）
+css/style.css            样式（移动优先）
+data/profiles.js         朋友档案 + 文件版梗库（本地私有，gitignore，不入库）
+data/profiles.example.js 档案文件模板（新机器复制它起步）
+js/storage.js            纯数据层：加载档案文件 + 唯一接触 localStorage 的模块
+js/prompts.js            两套提示词（参谋对话 / 总结对话）+ 梗库注入
+js/api.js                浏览器直连大模型 API（流式 SSE + 非流式）、错误分类
+js/markdown.js           模型输出解析：markdown 子集渲染 + msg 气泡块拆分
+js/ui.js                 共享组件：弹窗、toast、复制、人物选择器
+js/lock.js               锁屏（打开页面的密码门帘）
+js/chat.js               主界面（聊天流、流式渲染、气泡复制、总结链路）
+js/manage.js             档案管理页（档案只读展示/旧档案迁移/预设/梗库/设置）
 ```
 
 `storage.js` 不依赖其他模块，将来加新功能（比如素材路由）直接复用同一份档案数据。
+
+旧版本把档案存在浏览器 localStorage 里；升级后档案页会出现迁移卡片，
+按提示「下载档案文件 → 放进 data/ → 刷新确认 → 清除旧档案」即可一次迁完。
+「总结」生成的要点现在弹窗展示并可复制，自己贴进 `data/profiles.js` 的 notes（或直接叫 Claude 归档）。
 
 ## 服务商与模型
 

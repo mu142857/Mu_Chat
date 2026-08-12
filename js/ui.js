@@ -182,9 +182,8 @@ export function openPersonaPicker({ onSelect }) {
   sheet.appendChild(body);
 
   const foot = el('div', 'sheet-foot');
-  const btnCreate = el('button', 'btn-secondary', '＋ 新建档案');
-  btnCreate.style.width = '100%';
-  foot.appendChild(btnCreate);
+  foot.appendChild(el('div', 'sheet-foot-hint',
+    '建新档案：编辑 data/profiles.js 文件（或叫 Claude 建）；临时对象可先用预设身份'));
   sheet.appendChild(foot);
 
   function pick(ref) {
@@ -202,7 +201,7 @@ export function openPersonaPicker({ onSelect }) {
 
     body.appendChild(el('div', 'list-group-title', '档案'));
     if (!profiles.length) {
-      body.appendChild(el('div', 'list-empty', kw ? '没有匹配的档案' : '还没有档案，可以在下方快捷新建'));
+      body.appendChild(el('div', 'list-empty', kw ? '没有匹配的档案' : '还没有档案，见下方提示'));
     }
     for (const p of profiles) {
       const item = el('button', 'list-item');
@@ -230,59 +229,6 @@ export function openPersonaPicker({ onSelect }) {
     }
   }
 
-  function renderQuickCreate() {
-    body.innerHTML = '';
-    foot.hidden = true;
-    search.disabled = true;
-
-    const wrap = el('div', 'quick-create');
-    wrap.appendChild(el('div', 'field-label', '备注名'));
-    const nameInput = el('input');
-    nameInput.placeholder = '比如：Tony';
-    wrap.appendChild(nameInput);
-
-    wrap.appendChild(el('div', 'field-label', '关系层级'));
-    const seg = el('div', 'segmented');
-    let tier = 3;
-    const segBtns = [1, 2, 3].map((t) => {
-      const b = el('button', t === tier ? 'active' : '', TIER_LABELS[t]);
-      b.addEventListener('click', () => {
-        tier = t;
-        segBtns.forEach((x, i) => x.classList.toggle('active', i + 1 === t));
-      });
-      seg.appendChild(b);
-      return b;
-    });
-    wrap.appendChild(seg);
-
-    const actions = el('div', 'form-actions');
-    const btnBack = el('button', 'btn-secondary', '返回');
-    const btnOk = el('button', 'btn-secondary', '创建并选中');
-    btnOk.style.color = 'var(--green-dark)';
-    actions.appendChild(btnBack);
-    actions.appendChild(btnOk);
-    wrap.appendChild(actions);
-    body.appendChild(wrap);
-    setTimeout(() => nameInput.focus(), 50);
-
-    btnBack.addEventListener('click', () => {
-      foot.hidden = false;
-      search.disabled = false;
-      renderList(search.value);
-    });
-    btnOk.addEventListener('click', () => {
-      const name = nameInput.value.trim();
-      if (!name) { showToast('请填写备注名'); return; }
-      try {
-        const profile = store.createProfile({ name, tier });
-        pick({ type: 'profile', id: profile.id });
-      } catch (e) {
-        showToast(e.userMessage || '创建失败');
-      }
-    });
-  }
-
   search.addEventListener('input', () => renderList(search.value));
-  btnCreate.addEventListener('click', renderQuickCreate);
   renderList('');
 }

@@ -13,7 +13,7 @@ export const TIER_GUIDANCE = {
 
 /* ---------- 聊天式参谋 ---------- */
 
-export function buildChatSystemPrompt(persona) {
+export function buildChatSystemPrompt(persona, memes = []) {
   return `你是用户的微信社交参谋兼回复代笔——一个懂人情世故、会说话的靠谱朋友。用户会把微信聊天记录和实际情况告诉你，你帮他看清局面、拿捏分寸、写出能直接发出去的回复。
 
 这是连续的多轮咨询：用户随时会补充对方的新回复、让你改措辞、追问策略，默认都是同一件事的延续。
@@ -23,7 +23,7 @@ export function buildChatSystemPrompt(persona) {
 - 【我说】：用户的想法、要求或追问，可能单独出现。
 缺关键信息影响判断时，直接问用户。
 
-${buildPersonaSection(persona)}
+${buildPersonaSection(persona)}${buildMemesSection(memes)}
 
 【输出格式】
 1. 凡是可以直接发给对方的消息，一律放进 msg 代码块，每条气泡一个块：
@@ -78,6 +78,26 @@ export function buildSummaryUserMessage({ persona, chat }) {
 }
 
 /* ---------- 内部拼装 ---------- */
+
+const MEMES_PER_CALL = 12;
+
+/** 每次随机抽一批，回复风格有变化、也省 token */
+function buildMemesSection(memes) {
+  const pool = (memes || []).filter(Boolean);
+  if (!pool.length) return '';
+  const picked = pool.slice();
+  for (let i = picked.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [picked[i], picked[j]] = [picked[j], picked[i]];
+  }
+  const lines = picked.slice(0, MEMES_PER_CALL).map((t) => `- ${t}`).join('\n');
+  return `
+
+【我收藏的梗和好句】
+用户平时收藏的梗、觉得妙的说法，仅作风格弹药：
+${lines}
+用法：时机合适、跟语境贴的时候自然化用一两条，让回复更有梗；对不上语境就一条也别用，绝不硬塞。人物设定要求礼貌克制（如老师前辈）时默认不用。`;
+}
 
 function buildPersonaSection(persona) {
   if (!persona) {

@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+
+# 朋友档案是私人数据，只留在本机（要在别的机器用就手动拷贝 data/profiles.js）
+data/profiles.js

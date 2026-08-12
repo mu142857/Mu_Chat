@@ -1,5 +1,6 @@
 /**
- * manage.js — 档案管理页：档案 CRUD、预设身份、设置（key/模型/导入导出/清空）。
+ * manage.js — 档案管理页：档案（只读，数据在 data/profiles.js 文件里）、预设身份、梗库、
+ * 设置（key/模型/锁屏/导入导出/清空）。
  */
 
 import * as store from './storage.js';
@@ -8,13 +9,14 @@ import { PROVIDER_PRESETS } from './api.js';
 import { el, showToast, confirmDialog, promptApiKey, fmtRelative } from './ui.js';
 
 let refs = {};
-// 当前展开的编辑项：{type:'profile'|'preset'|'new-profile'|'new-preset', id?}
+// 当前展开的项：{type:'profile'|'preset'|'new-preset', id?}
 let expanded = null;
 
 export function initManageView() {
   refs = {
     profiles: document.getElementById('profiles-section'),
     presets: document.getElementById('presets-section'),
+    memes: document.getElementById('memes-section'),
     settings: document.getElementById('settings-section'),
   };
 
@@ -29,6 +31,7 @@ export function initManageView() {
 export function refreshManageView() {
   renderProfilesSection();
   renderPresetsSection();
+  renderMemesSection();
   renderSettingsSection();
 }
 
@@ -36,7 +39,7 @@ function dataChanged() {
   document.dispatchEvent(new CustomEvent('muchat:data-changed', { detail: { source: 'manage' } }));
 }
 
-/* ============ 档案 ============ */
+/* ============ 档案（只读，数据在 data/profiles.js） ============ */
 
 function renderProfilesSection() {
   const root = refs.profiles;
@@ -45,23 +48,18 @@ function renderProfilesSection() {
 
   const head = el('div', 'manage-section-head');
   head.appendChild(el('h2', '', '档案'));
-  const btnNew = el('button', 'btn-secondary', '＋ 新建档案');
-  btnNew.addEventListener('click', () => {
-    expanded = { type: 'new-profile' };
-    renderProfilesSection();
-  });
-  head.appendChild(btnNew);
   section.appendChild(head);
 
-  if (expanded && expanded.type === 'new-profile') {
-    const card = el('div', 'entity-card');
-    card.appendChild(buildProfileForm(null));
-    section.appendChild(card);
-  }
+  section.appendChild(el('div', 'file-hint',
+    '📁 档案存在本地文件 data/profiles.js 里：直接改文件，或叫 Claude 改，保存后刷新本页生效。'));
+
+  const legacy = store.listLegacyProfiles();
+  if (legacy.length) section.appendChild(buildMigrationCard(legacy));
 
   const profiles = store.listProfiles();
-  if (!profiles.length && !(expanded && expanded.type === 'new-profile')) {
-    section.appendChild(el('div', 'empty-hint', '还没有档案。点右上角新建，或在回复页的人物选择器里快捷创建。'));
+  if (!profiles.length) {
+    section.appendChild(el('div', 'empty-hint',
+      '还没有档案。打开 data/profiles.js，照着里面的示例加，或直接叫 Claude 帮你建。'));
   }
 
   for (const tier of [1, 2, 3]) {
@@ -72,9 +70,6 @@ function renderProfilesSection() {
       section.appendChild(buildProfileCard(p));
     }
   }
-  // 层级异常的兜底显示
-  const others = profiles.filter((p) => ![1, 2, 3].includes(p.tier));
-  for (const p of others) section.appendChild(buildProfileCard(p));
 
   root.appendChild(section);
 }
@@ -96,104 +91,109 @@ function buildProfileCard(p) {
   card.appendChild(row);
 
   if (expanded && expanded.type === 'profile' && expanded.id === p.id) {
-    card.appendChild(buildProfileForm(p));
+    card.appendChild(buildProfileView(p));
   }
   return card;
 }
 
-/** p 为 null 时表示新建 */
-function buildProfileForm(p) {
-  const form = el('div', 'edit-form');
-
-  const fields = {};
-  const addField = (label, key, { textarea = false, rows = 2, placeholder = '' } = {}) => {
-    form.appendChild(el('div', 'field-label', label));
-    const input = textarea ? el('textarea') : el('input');
-    if (textarea) input.rows = rows;
-    input.placeholder = placeholder;
-    input.value = p ? (p[key] || '') : '';
-    form.appendChild(input);
-    fields[key] = input;
-  };
-
-  addField('备注名', 'name', { placeholder: '必填' });
-
-  form.appendChild(el('div', 'field-label', '关系层级'));
-  const seg = el('div', 'segmented');
-  let tier = p ? p.tier : 3;
-  const segBtns = [1, 2, 3].map((t) => {
-    const b = el('button', t === tier ? 'active' : '', TIER_LABELS[t]);
-    b.addEventListener('click', () => {
-      tier = t;
-      segBtns.forEach((x, i) => x.classList.toggle('active', i + 1 === t));
-    });
-    seg.appendChild(b);
-    return b;
-  });
-  form.appendChild(seg);
-
-  addField('他关心什么', 'interests', { textarea: true, placeholder: '兴趣、在意的事' });
-  addField('共同经历和梗', 'memories', { textarea: true, placeholder: '一起做过的事、只有你们懂的梗' });
-  addField('发消息风格', 'style', { textarea: true, placeholder: '称呼、语气、表情习惯、分寸禁忌' });
-  addField('我对这个人的目的', 'goal', { textarea: true, placeholder: '想维持/加深关系？想合作？想请教？' });
-  addField('自由备注', 'notes', { textarea: true, rows: 4, placeholder: '沉淀的判断素材，总结要点也会追加到这里' });
-
-  const actions = el('div', 'form-actions');
-  const btnSave = el('button', 'btn-secondary', '保存');
-  btnSave.style.color = 'var(--green-dark)';
-  btnSave.addEventListener('click', () => {
-    const name = fields.name.value.trim();
-    if (!name) { showToast('备注名不能为空'); return; }
-    const data = {
-      name, tier,
-      interests: fields.interests.value,
-      memories: fields.memories.value,
-      style: fields.style.value,
-      goal: fields.goal.value,
-      notes: fields.notes.value,
-    };
-    try {
-      if (p) store.updateProfile(p.id, data);
-      else store.createProfile(data);
-    } catch (e) {
-      showToast(e.userMessage || '保存失败');
-      return;
-    }
-    expanded = null;
-    renderProfilesSection();
-    dataChanged();
-    showToast('已保存');
-  });
-  actions.appendChild(btnSave);
-
-  if (p) {
-    const btnDelete = el('button', 'btn-secondary btn-danger', '删除');
-    btnDelete.addEventListener('click', async () => {
-      const yes = await confirmDialog({
-        title: `删除「${p.name}」？`,
-        body: '档案和备注会被删除，无法恢复。',
-        confirmText: '删除',
-        danger: true,
-      });
-      if (!yes) return;
-      store.deleteProfile(p.id);
-      expanded = null;
-      renderProfilesSection();
-      dataChanged();
-      showToast('已删除');
-    });
-    actions.appendChild(btnDelete);
+/** 只读展示档案内容；编辑请去 data/profiles.js */
+function buildProfileView(p) {
+  const view = el('div', 'profile-view');
+  const fields = [
+    ['他关心什么', p.interests],
+    ['共同经历和梗', p.memories],
+    ['发消息风格', p.style],
+    ['我对这个人的目的', p.goal],
+    ['自由备注', p.notes],
+  ];
+  let hasAny = false;
+  for (const [label, value] of fields) {
+    if (!value || !value.trim()) continue;
+    hasAny = true;
+    view.appendChild(el('div', 'field-label', label));
+    view.appendChild(el('div', 'field-text', value.trim()));
   }
+  if (!hasAny) {
+    view.appendChild(el('div', 'empty-hint', '这份档案还没写内容，去 data/profiles.js 里补充。'));
+  }
+  return view;
+}
 
-  const btnCollapse = el('button', 'btn-secondary', '收起');
-  btnCollapse.addEventListener('click', () => {
-    expanded = null;
-    renderProfilesSection();
+/* ---- 旧档案迁移（浏览器 localStorage → data/profiles.js） ---- */
+
+function buildMigrationCard(legacy) {
+  const card = el('div', 'notice-card');
+  card.appendChild(el('div', 'notice-title', `检测到浏览器里的 ${legacy.length} 份旧档案`));
+  card.appendChild(el('div', 'notice-body',
+    '旧版本把档案存在浏览器里（清缓存会丢）。迁移方法：\n' +
+    '1. 点「下载档案文件」得到 profiles.js\n' +
+    '2. 用它替换应用目录里的 data/profiles.js（原文件已有内容就手动合并，或叫 Claude 合并）\n' +
+    '3. 刷新本页，确认档案都显示出来了，再点「清除浏览器旧档案」'));
+  const actions = el('div', 'form-actions');
+  const btnDownload = el('button', 'btn-secondary', '下载档案文件');
+  btnDownload.addEventListener('click', () => {
+    downloadFile('profiles.js', buildProfilesFileContent(legacy));
+    showToast('已下载，替换 data/profiles.js 后刷新');
   });
-  actions.appendChild(btnCollapse);
+  actions.appendChild(btnDownload);
+  const btnClear = el('button', 'btn-secondary btn-danger', '清除浏览器旧档案');
+  btnClear.addEventListener('click', async () => {
+    const yes = await confirmDialog({
+      title: '清除浏览器里的旧档案？',
+      body: '请确认档案已经迁进 data/profiles.js 并能在上方列表看到。清除后不可恢复。',
+      confirmText: '清除',
+      danger: true,
+    });
+    if (!yes) return;
+    store.clearLegacyProfiles();
+    renderProfilesSection();
+    showToast('已清除');
+  });
+  actions.appendChild(btnClear);
+  card.appendChild(actions);
+  return card;
+}
 
-  form.appendChild(actions);
-  return form;
+function buildProfilesFileContent(items) {
+  const js = (v) => JSON.stringify(String(v == null ? '' : v));
+  const entries = items.map((p) => [
+    '  {',
+    `    name: ${js(p.name)},`,
+    `    tier: ${[1, 2, 3].includes(Number(p.tier)) ? Number(p.tier) : 3},`,
+    `    interests: ${js(p.interests)},`,
+    `    memories: ${js(p.memories)},`,
+    `    style: ${js(p.style)},`,
+    `    goal: ${js(p.goal)},`,
+    `    notes: ${js(p.notes)},`,
+    '  },',
+  ].join('\n')).join('\n');
+  return [
+    '/**',
+    ' * data/profiles.js — 朋友档案（本地文件，只属于这台电脑）。',
+    ' * 由「旧档案迁移」自动生成。直接编辑本文件或叫 Claude 改，保存后刷新页面生效。',
+    ' * 字段说明见 data/profiles.example.js。',
+    ' */',
+    '',
+    'export const profiles = [',
+    entries,
+    '];',
+    '',
+    '/** 可选：文件版梗库，每条一个字符串 */',
+    'export const memes = [];',
+    '',
+  ].join('\n');
+}
+
+function downloadFile(filename, content) {
+  const blob = new Blob([content], { type: 'text/javascript' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 /* ============ 预设身份 ============ */
@@ -313,6 +313,61 @@ function buildPresetForm(s) {
   return form;
 }
 
+/* ============ 梗库 ============ */
+
+function renderMemesSection() {
+  const root = refs.memes;
+  root.innerHTML = '';
+  const section = el('div', 'manage-section');
+
+  const head = el('div', 'manage-section-head');
+  head.appendChild(el('h2', '', '梗库'));
+  section.appendChild(head);
+
+  section.appendChild(el('div', 'empty-hint',
+    '看到好玩的梗、觉得妙的说法就存进来，生成回复时会随机带几条给 AI 当风格参考。'));
+
+  const addWrap = el('div', 'meme-add');
+  const ta = el('textarea');
+  ta.rows = 2;
+  ta.placeholder = '贴一条梗、一句你觉得妙的话…';
+  addWrap.appendChild(ta);
+  const btnAdd = el('button', 'btn-secondary', '收藏');
+  btnAdd.addEventListener('click', () => {
+    if (!ta.value.trim()) { showToast('先写点内容'); return; }
+    try {
+      store.addMeme(ta.value);
+    } catch (e) {
+      showToast(e.userMessage || '保存失败');
+      return;
+    }
+    ta.value = '';
+    renderMemesSection();
+    showToast('已收藏');
+  });
+  addWrap.appendChild(btnAdd);
+  section.appendChild(addWrap);
+
+  const memes = store.listMemes();
+  for (const m of memes.slice().reverse()) {
+    const row = el('div', 'meme-row');
+    row.appendChild(el('div', 'meme-text', m.text));
+    if (m.fromFile) {
+      row.appendChild(el('span', 'tier-badge preset-badge', '文件'));
+    } else {
+      const btnDel = el('button', 'btn-small btn-danger', '删除');
+      btnDel.addEventListener('click', () => {
+        store.deleteMeme(m.id);
+        renderMemesSection();
+      });
+      row.appendChild(btnDel);
+    }
+    section.appendChild(row);
+  }
+
+  root.appendChild(section);
+}
+
 /* ============ 设置 ============ */
 
 function maskKey(key) {
@@ -430,9 +485,35 @@ function renderSettingsSection() {
   urlRow.appendChild(urlInput);
   section.appendChild(urlRow);
 
+  // 锁屏
+  const lockRow = el('div', 'settings-row');
+  const lockLeft = el('div');
+  lockLeft.appendChild(el('div', 'row-label', '锁屏密码'));
+  const lockEnabled = store.isLockEnabled();
+  lockLeft.appendChild(el('div', 'row-value',
+    lockEnabled ? '已开启，打开页面需输入' : '只挡顺手翻看，不是加密'));
+  lockRow.appendChild(lockLeft);
+  const lockBtns = el('div', 'row-btns');
+  const btnLockSet = el('button', 'btn-small', lockEnabled ? '修改' : '设置');
+  btnLockSet.addEventListener('click', () => openLockDialog());
+  lockBtns.appendChild(btnLockSet);
+  if (lockEnabled) {
+    const btnLockOff = el('button', 'btn-small', '关闭');
+    btnLockOff.addEventListener('click', async () => {
+      const yes = await confirmDialog({ title: '关闭锁屏？', confirmText: '关闭' });
+      if (!yes) return;
+      store.clearLock();
+      renderSettingsSection();
+      showToast('已关闭锁屏');
+    });
+    lockBtns.appendChild(btnLockOff);
+  }
+  lockRow.appendChild(lockBtns);
+  section.appendChild(lockRow);
+
   // 导出
   const exportRow = el('div', 'settings-row');
-  exportRow.appendChild(el('div', 'row-label', '导出全部数据（不含 Key）'));
+  exportRow.appendChild(el('div', 'row-label', '导出数据（预设/梗库/设置，不含 Key）'));
   const btnExport = el('button', 'btn-small', '导出 JSON');
   btnExport.addEventListener('click', onExport);
   exportRow.appendChild(btnExport);
@@ -463,7 +544,7 @@ function renderSettingsSection() {
   btnClear.addEventListener('click', async () => {
     const yes = await confirmDialog({
       title: '清空全部数据？',
-      body: '档案、预设、设置、API Key、当前对话都会被删除，无法恢复。',
+      body: '预设、梗库、设置、API Key、锁屏、当前对话都会被删除，无法恢复。\n（档案文件 data/profiles.js 不受影响）',
       confirmText: '确认清空',
       danger: true,
       requireText: '清空',
@@ -481,6 +562,54 @@ function renderSettingsSection() {
   }
 
   root.appendChild(section);
+}
+
+/** 设置/修改锁屏密码：输两遍，存散列 */
+function openLockDialog() {
+  const root = document.getElementById('modal-root');
+  const overlay = el('div', 'overlay center');
+  const dialog = el('div', 'dialog');
+  dialog.appendChild(el('div', 'dialog-title', '设置锁屏密码'));
+  dialog.appendChild(el('div', 'dialog-body',
+    '打开页面时需要输入（浏览器可以帮你记住）。\n它只挡顺手翻看，数据本身不加密；忘了密码可以叫 Claude 帮你解锁。'));
+
+  const pw1 = el('input');
+  pw1.type = 'password';
+  pw1.placeholder = '新密码';
+  pw1.autocomplete = 'new-password';
+  dialog.appendChild(pw1);
+  const pw2 = el('input');
+  pw2.type = 'password';
+  pw2.placeholder = '再输一遍';
+  pw2.autocomplete = 'new-password';
+  dialog.appendChild(pw2);
+
+  const actions = el('div', 'dialog-actions');
+  const btnCancel = el('button', 'dialog-cancel', '取消');
+  const btnOk = el('button', 'dialog-confirm', '保存');
+  actions.appendChild(btnCancel);
+  actions.appendChild(btnOk);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  root.appendChild(overlay);
+  setTimeout(() => pw1.focus(), 50);
+
+  btnCancel.addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  btnOk.addEventListener('click', async () => {
+    const v = pw1.value;
+    if (!v) { pw1.focus(); return; }
+    if (v !== pw2.value) { showToast('两次输入不一致'); pw2.focus(); return; }
+    try {
+      await store.setLockPassword(v);
+    } catch (e) {
+      showToast(e.userMessage || '保存失败');
+      return;
+    }
+    overlay.remove();
+    renderSettingsSection();
+    showToast('已开启锁屏，下次打开页面时需要输入');
+  });
 }
 
 function onExport() {
@@ -516,8 +645,10 @@ function onImport(file) {
     }
     const yes = await confirmDialog({
       title: '确认导入？',
-      body: `当前：${preview.current.profiles} 个档案、${preview.current.presets} 个预设\n` +
-        `导入后：${preview.incoming.profiles} 个档案、${preview.incoming.presets} 个预设\n\n` +
+      body: `当前：${preview.current.presets} 个预设、${preview.current.memes} 条梗\n` +
+        `导入后：${preview.incoming.presets} 个预设、${preview.incoming.memes} 条梗\n\n` +
+        (preview.hasLegacyProfiles
+          ? '备份里的档案不会导入（档案现在存在 data/profiles.js 文件里）。\n' : '') +
         '本机数据将被整体覆盖。',
       confirmText: '覆盖导入',
       danger: true,
