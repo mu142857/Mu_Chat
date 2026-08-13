@@ -619,12 +619,17 @@ function renderSettingsSection() {
   keyRow.appendChild(keyBtns);
   section.appendChild(keyRow);
 
-  // 模型
+  // 模型：认识的服务商给下拉菜单，选「自定义」或填了列表外的 ID 才露出手填框
+  const knownModels = (PROVIDER_PRESETS.find((p) => p.id === currentId) || {}).models || [];
+  const isListedModel = knownModels.some((m) => m.id === settings.model);
+
   const modelRow = el('div', 'settings-row');
   const modelLeft = el('div');
   modelLeft.appendChild(el('div', 'row-label', '模型'));
-  modelLeft.appendChild(el('div', 'row-value', '从服务商文档复制模型 ID'));
+  modelLeft.appendChild(el('div', 'row-value',
+    knownModels.length ? '随时可换，换完立刻生效' : '从服务商文档复制模型 ID'));
   modelRow.appendChild(modelLeft);
+
   const modelInput = el('input');
   modelInput.value = settings.model;
   modelInput.placeholder = '模型 ID';
@@ -632,6 +637,33 @@ function renderSettingsSection() {
     store.updateSettings({ model: modelInput.value.trim() });
     showToast('已保存');
   });
+
+  if (knownModels.length) {
+    const modelSelect = el('select');
+    for (const m of knownModels) {
+      const opt = el('option', '', `${m.id} — ${m.note}`);
+      opt.value = m.id;
+      if (m.id === settings.model) opt.selected = true;
+      modelSelect.appendChild(opt);
+    }
+    const customOpt = el('option', '', '自定义…');
+    customOpt.value = '';
+    if (!isListedModel) customOpt.selected = true;
+    modelSelect.appendChild(customOpt);
+    modelSelect.addEventListener('change', () => {
+      if (!modelSelect.value) {
+        modelInput.hidden = false;
+        modelInput.focus();
+        return;
+      }
+      store.updateSettings({ model: modelSelect.value });
+      showToast('已切换到 ' + modelSelect.value);
+      renderSettingsSection();
+    });
+    modelRow.appendChild(modelSelect);
+    modelInput.hidden = isListedModel;
+  }
+
   modelRow.appendChild(modelInput);
   section.appendChild(modelRow);
 
