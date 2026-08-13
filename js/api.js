@@ -24,6 +24,7 @@ export const PROVIDER_PRESETS = [
   { id: 'kimi', name: 'Kimi（月之暗面）', protocol: 'openai', baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'kimi-latest' },
   { id: 'qwen', name: '通义千问', protocol: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus' },
   { id: 'openai', name: 'OpenAI（GPT）', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5-mini' },
+  { id: 'gemini', name: 'Gemini（Google）', protocol: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
   { id: 'anthropic', name: 'Claude（Anthropic）', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-6' },
   { id: 'custom', name: '自定义（OpenAI 兼容）', protocol: 'openai', baseUrl: '', defaultModel: '' },
 ];
@@ -167,7 +168,9 @@ function extractOpenAIText(data) {
 async function classifyHttpError(resp) {
   let serverMsg = '';
   try {
-    const body = await resp.json();
+    let body = await resp.json();
+    // Gemini 的错误体是数组包着 error，其余家是对象
+    if (Array.isArray(body)) body = body[0];
     serverMsg = body && body.error && body.error.message ? body.error.message : '';
   } catch { /* 忽略 */ }
 
@@ -179,6 +182,10 @@ async function classifyHttpError(resp) {
     case 404:
       return new ApiError('not_found', '模型名不存在，请到设置里检查模型名称');
     case 400:
+      // Gemini 把「key 不对」也报成 400，归到 auth 才不会误导
+      if (/api.?key/i.test(serverMsg)) {
+        return new ApiError('auth', 'API Key 无效或已被撤销');
+      }
       return new ApiError('bad_request', '请求无效：' + (serverMsg || '请检查设置'));
     case 413:
       return new ApiError('too_large', '对话内容太长了，点「新对话」开一段吧');

@@ -71,6 +71,7 @@ js/manage.js             档案管理页（档案/我/类别只读展示、旧�
 | Kimi（月之暗面） | https://platform.moonshot.cn | `kimi-latest` |
 | 通义千问 | 阿里云百炼 https://bailian.console.aliyun.com | `qwen-plus` |
 | OpenAI（GPT） | https://platform.openai.com（需境外支付方式） | `gpt-5-mini` |
+| Gemini（Google） | Google AI Studio https://aistudio.google.com/apikey | `gemini-2.5-flash` |
 | Claude（Anthropic） | https://platform.claude.com | `claude-sonnet-4-6` |
 
 也支持"自定义（OpenAI 兼容）"：填任意 OpenAI 兼容接口的地址和模型即可。
