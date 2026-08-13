@@ -50,14 +50,13 @@ function renderProfilesSection() {
   head.appendChild(el('h2', '', '档案'));
   section.appendChild(head);
 
-  section.appendChild(el('div', 'file-hint',
-    '📁 档案存在本地文件 data/profiles.js 里：直接改文件，或叫 Claude 改，保存后刷新本页生效。'));
+  section.appendChild(buildSourceCard());
 
   const legacy = store.listLegacyProfiles();
   if (legacy.length) section.appendChild(buildMigrationCard(legacy));
 
   const profiles = store.listProfiles();
-  if (!profiles.length) {
+  if (!profiles.length && store.getDataSource() === 'file') {
     section.appendChild(el('div', 'empty-hint',
       '还没有档案。打开 data/profiles.js，照着里面的示例加，或直接叫 Claude 帮你建。'));
   }
@@ -72,6 +71,161 @@ function renderProfilesSection() {
   }
 
   root.appendChild(section);
+}
+
+/**
+ * 档案来源卡：电脑上（有档案文件）给「导出」，其他设备（线上版没有档案文件）给「导入」。
+ * 档案文件永远优先，导入的副本只在没有文件的设备上生效，所以真相源只有一个。
+ */
+function buildSourceCard() {
+  const wrap = el('div');
+  const source = store.getDataSource();
+
+  if (source === 'file') {
+    wrap.appendChild(el('div', 'file-hint',
+      '📁 档案存在本地文件 data/profiles.js 里：直接改文件，或叫 Claude 改，保存后刷新本页生效。\n'
+      + '要在手机上用，点「导出档案」拿到一份 JSON，传到手机后在线上版里导入。'));
+  } else if (source === 'imported') {
+    const at = store.getImportedAt();
+    wrap.appendChild(el('div', 'file-hint',
+      `📥 这台设备用的是导入的档案副本${at ? `（导入于 ${fmtRelative(at)}）` : ''}，只读。\n`
+      + '要改档案：在电脑上改 data/profiles.js（或叫 Claude 改），重新导出再导入一次。'));
+  } else {
+    wrap.appendChild(el('div', 'file-hint',
+      '📭 这台设备还没有档案。\n'
+      + '电脑上：把 data/profiles.example.js 复制成 data/profiles.js 再填内容（或叫 Claude 建）。\n'
+      + '手机 / 线上版：在电脑上点「导出档案」，把 JSON 传过来，再点下面的「导入档案」。'));
+    const err = store.getFileLoadError();
+    if (err) {
+      wrap.appendChild(el('div', 'empty-hint',
+        `档案文件没有加载：${err}\n（线上版没有这个文件是正常的；如果这是你的电脑，多半是文件里有语法错误）`));
+    }
+  }
+
+  const actions = el('div', 'form-actions');
+  if (source === 'file') {
+    const btnExport = el('button', 'btn-secondary', '导出档案');
+    btnExport.addEventListener('click', onExportProfiles);
+    actions.appendChild(btnExport);
+  } else {
+    const btnImport = el('button', 'btn-secondary', source === 'imported' ? '重新导入档案' : '导入档案');
+    btnImport.addEventListener('click', openProfilesImportDialog);
+    actions.appendChild(btnImport);
+    if (source === 'imported') {
+      const btnClear = el('button', 'btn-secondary btn-danger', '清除本设备的档案');
+      btnClear.addEventListener('click', async () => {
+        const yes = await confirmDialog({
+          title: '清除这台设备上的档案副本？',
+          body: '只影响这台设备；电脑上的 data/profiles.js 不受影响，随时可以重新导入。',
+          confirmText: '清除',
+          danger: true,
+        });
+        if (!yes) return;
+        store.clearImportedProfiles();
+        expanded = null;
+        refreshManageView();
+        dataChanged();
+        showToast('已清除');
+      });
+      actions.appendChild(btnClear);
+    }
+  }
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+function onExportProfiles() {
+  const bundle = store.exportProfilesBundle();
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  downloadFile(`muchat-profiles-${dateStr}.json`, JSON.stringify(bundle, null, 2), 'application/json');
+  showToast('已导出。这份文件含全部私人内容，只传给自己的设备', { duration: 4000 });
+}
+
+/** 导入档案：选文件或直接粘贴 JSON（手机上粘贴往往比传文件方便） */
+function openProfilesImportDialog() {
+  const root = document.getElementById('modal-root');
+  const overlay = el('div', 'overlay center');
+  const dialog = el('div', 'dialog summary-dialog');
+  dialog.appendChild(el('div', 'dialog-title', '导入档案'));
+  dialog.appendChild(el('div', 'dialog-body',
+    '在电脑上点「导出档案」得到一份 JSON。把它传到这台设备后选择文件，\n'
+    + '或者直接把 JSON 内容粘进下面的框里。数据只存在这台设备的浏览器里，不会上传。'));
+
+  const fileInput = el('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.json,application/json';
+  fileInput.style.display = 'none';
+  const btnPick = el('button', 'btn-secondary', '选择 JSON 文件');
+  btnPick.addEventListener('click', () => fileInput.click());
+  dialog.appendChild(btnPick);
+  dialog.appendChild(fileInput);
+
+  const ta = el('textarea');
+  ta.placeholder = '或把导出的 JSON 内容粘贴到这里…';
+  dialog.appendChild(ta);
+
+  const actions = el('div', 'dialog-actions');
+  const btnCancel = el('button', 'dialog-cancel', '取消');
+  const btnOk = el('button', 'dialog-confirm', '导入');
+  actions.appendChild(btnCancel);
+  actions.appendChild(btnOk);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  root.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  btnCancel.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      ta.value = String(reader.result || '');
+      showToast('已读入文件，点「导入」确认');
+    };
+    reader.onerror = () => showToast('读取文件失败');
+    reader.readAsText(file);
+  });
+
+  btnOk.addEventListener('click', async () => {
+    const text = ta.value.trim();
+    if (!text) { showToast('先选择文件或粘贴内容'); return; }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      showToast('内容不是有效的 JSON');
+      return;
+    }
+    const preview = store.buildProfilesImportPreview(parsed);
+    if (!preview.ok) { showToast(preview.error, { duration: 3000 }); return; }
+    close();
+    const inc = preview.incoming;
+    const yes = await confirmDialog({
+      title: '确认导入档案？',
+      body: `将导入：${inc.profiles} 份档案、${inc.categories} 个类别、${inc.memes} 条梗`
+        + `${inc.hasMe ? '、我的档案' : ''}\n`
+        + `当前这台设备：${preview.current.profiles} 份档案、${preview.current.categories} 个类别\n\n`
+        + '本设备原有的档案副本会被整体覆盖。',
+      confirmText: '导入',
+      danger: true,
+    });
+    if (!yes) return;
+    try {
+      store.importProfilesBundle(parsed);
+    } catch (e) {
+      showToast(e.userMessage || '导入失败');
+      return;
+    }
+    expanded = null;
+    refreshManageView();
+    dataChanged();
+    showToast('导入完成');
+  });
 }
 
 function buildProfileCard(p) {
@@ -190,8 +344,8 @@ function buildProfilesFileContent(items) {
   ].join('\n');
 }
 
-function downloadFile(filename, content) {
-  const blob = new Blob([content], { type: 'text/javascript' });
+function downloadFile(filename, content, type = 'text/javascript') {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -214,13 +368,18 @@ function renderMeAndCategoriesSection() {
   section.appendChild(head);
 
   section.appendChild(el('div', 'file-hint',
-    '📁 「我的档案」和人物类别也存在 data/profiles.js 里：直接改文件或叫 Claude 改，刷新生效。类别用于还没建档案的人；档案里填了 category 就继承该类别的露出策略。'));
+    (store.getDataSource() === 'imported'
+      ? '📥 「我的档案」和人物类别跟着档案一起导入，这台设备上只读。\n'
+      : '📁 「我的档案」和人物类别也存在 data/profiles.js 里：直接改文件或叫 Claude 改，刷新生效。\n')
+    + '类别用于还没建档案的人；档案里填了 category 就继承该类别的露出策略。'));
 
   // 我的档案
   const me = store.getMe();
   if (!me) {
-    section.appendChild(el('div', 'empty-hint',
-      '还没写「我的档案」。在 data/profiles.js 的 me.background 里写清你是谁，参谋代笔时才有底。'));
+    if (store.getDataSource() === 'file') {
+      section.appendChild(el('div', 'empty-hint',
+        '还没写「我的档案」。在 data/profiles.js 的 me.background 里写清你是谁，参谋代笔时才有底。'));
+    }
   } else {
     const card = el('div', 'entity-card');
     const row = el('button', 'entity-row');
@@ -244,7 +403,7 @@ function renderMeAndCategoriesSection() {
 
   // 人物类别
   const categories = store.listCategories();
-  if (!categories.length) {
+  if (!categories.length && store.getDataSource() === 'file') {
     section.appendChild(el('div', 'empty-hint',
       '还没有人物类别。在 data/profiles.js 的 categories 里加，或叫 Claude 帮你写。'));
   }

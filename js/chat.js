@@ -643,10 +643,11 @@ function openSummaryDialog(text, persona) {
   ta.value = text;
   dialog.appendChild(ta);
 
-  // 档案在本地文件里，页面写不进去：复制要点后贴进文件，或直接丢给 Claude
+  // 档案在电脑的本地文件里，页面写不进去：复制要点后贴进文件，或直接丢给 Claude
   const who = persona && persona.kind === 'profile' ? `「${persona.profile.name}」` : '对应人';
   dialog.appendChild(el('div', 'dialog-note',
-    `档案在 data/profiles.js 文件里。复制要点后贴进${who}的 notes，或把要点发给 Claude 让它归档。`));
+    `档案在电脑的 data/profiles.js 文件里。复制要点后贴进${who}的 notes，或把要点发给 Claude 让它归档。`
+    + (store.getDataSource() === 'imported' ? '\n（这台设备只读，归档后重新导出导入一次才会同步过来）' : '')));
 
   const actions = el('div', 'dialog-actions');
   const btnClose = el('button', 'dialog-cancel', '关闭');

@@ -183,7 +183,9 @@ export function openPersonaPicker({ onSelect }) {
 
   const foot = el('div', 'sheet-foot');
   foot.appendChild(el('div', 'sheet-foot-hint',
-    '建新档案、改类别：编辑 data/profiles.js 文件（或叫 Claude 改）；还没建档案的人先用类别'));
+    store.getDataSource() === 'imported'
+      ? '这台设备上档案只读：要加人、改类别，在电脑上改完再导出导入一次；临时对象先用类别'
+      : '建新档案、改类别：编辑 data/profiles.js 文件（或叫 Claude 改）；还没建档案的人先用类别'));
   sheet.appendChild(foot);
 
   function pick(ref) {

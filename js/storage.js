@@ -7,6 +7,8 @@
 const KEYS = {
   profiles: 'muchat.profiles',      // 旧版遗留：档案已迁到 data/profiles.js 文件，此 key 只用于一次性迁移
   presets: 'muchat.presets',        // 旧版遗留：预设已被文件里的人物类别取代，加载时清除
+  // 导入的档案副本：给没有档案文件的环境用（手机上的线上版）。有文件时文件优先，这份不生效。
+  profilesImport: 'muchat.profilesImport',
   settings: 'muchat.settings',
   session: 'muchat.session',
   memes: 'muchat.memes',
@@ -97,31 +99,20 @@ let fileMe = null;
 let fileCategories = [];
 let fileProfiles = [];
 let fileMemes = [];
+let dataSource = 'none';   // 'file' 档案文件 | 'imported' 本设备导入的副本 | 'none'
+let fileLoadError = '';    // 档案文件加载失败的原因（文件不存在，或文件里有语法错误）
 
 function cleanStr(v) {
   return typeof v === 'string' ? v : (v == null ? '' : String(v));
 }
 
-/**
- * 加载本地档案文件。文件不存在（新环境 / 线上部署）时静默降级为空档案。
- * 必须在 app 初始化视图前 await 一次。
- */
-export async function loadLocalData() {
-  // 旧版把预设身份存在 localStorage；已被文件里的人物类别取代，顺手清掉
-  rawRemove(KEYS.presets);
-
-  let mod = null;
-  try {
-    // 带时间戳绕开浏览器的模块缓存，保证"改完文件刷新就生效"
-    mod = await import('../data/profiles.js?t=' + Date.now());
-  } catch {
-    return;
-  }
-  const meRaw = mod.me && typeof mod.me === 'object' ? mod.me : null;
+/** 把一份 {me, categories, profiles, memes} 规范化后装进模块状态 */
+function applyLocalData(src) {
+  const meRaw = src.me && typeof src.me === 'object' ? src.me : null;
   fileMe = meRaw && cleanStr(meRaw.background).trim()
     ? { name: cleanStr(meRaw.name).trim(), background: cleanStr(meRaw.background).trim() }
     : null;
-  fileCategories = (Array.isArray(mod.categories) ? mod.categories : [])
+  fileCategories = (Array.isArray(src.categories) ? src.categories : [])
     .filter((c) => c && cleanStr(c.name).trim())
     .map((c) => ({
       id: 'ct_' + cleanStr(c.name).trim(),
@@ -129,8 +120,7 @@ export async function loadLocalData() {
       description: cleanStr(c.description),
       reveal: cleanStr(c.reveal),
     }));
-  const items = Array.isArray(mod.profiles) ? mod.profiles : [];
-  fileProfiles = items
+  fileProfiles = (Array.isArray(src.profiles) ? src.profiles : [])
     .filter((p) => p && cleanStr(p.name).trim())
     .map((p) => ({
       id: 'pf_' + cleanStr(p.name).trim(),
@@ -143,9 +133,124 @@ export async function loadLocalData() {
       goal: cleanStr(p.goal),
       notes: cleanStr(p.notes),
     }));
-  fileMemes = (Array.isArray(mod.memes) ? mod.memes : [])
+  fileMemes = (Array.isArray(src.memes) ? src.memes : [])
     .map((t) => cleanStr(t).trim())
     .filter(Boolean);
+}
+
+/**
+ * 加载档案数据。优先本地档案文件 data/profiles.js（电脑上的唯一真相源）；
+ * 文件不存在时（手机上的线上版：该文件被 gitignore，从不发布）退回本设备导入的副本。
+ * 必须在 app 初始化视图前 await 一次。
+ */
+export async function loadLocalData() {
+  // 旧版把预设身份存在 localStorage；已被文件里的人物类别取代，顺手清掉
+  rawRemove(KEYS.presets);
+
+  let mod = null;
+  try {
+    // 带时间戳绕开浏览器的模块缓存，保证"改完文件刷新就生效"
+    mod = await import('../data/profiles.js?t=' + Date.now());
+  } catch (e) {
+    fileLoadError = (e && e.message) ? String(e.message) : '未知原因';
+  }
+
+  if (mod) {
+    applyLocalData(mod);
+    dataSource = 'file';
+    return;
+  }
+  const imported = read(KEYS.profilesImport, null);
+  if (imported && typeof imported === 'object') {
+    applyLocalData(imported);
+    dataSource = 'imported';
+    return;
+  }
+  dataSource = 'none';
+}
+
+/** 'file' | 'imported' | 'none' */
+export function getDataSource() {
+  return dataSource;
+}
+
+/** 档案文件加载失败的原因；成功加载时为空串 */
+export function getFileLoadError() {
+  return dataSource === 'file' ? '' : fileLoadError;
+}
+
+/* ---- 档案的导出 / 导入（电脑导出一份，手机导入后只读使用） ---- */
+
+const PROFILES_BUNDLE_APP = 'muchat-profiles';
+
+/** 打包当前生效的档案数据，用于拷到别的设备（含全部私人内容，别外传） */
+export function exportProfilesBundle() {
+  return {
+    app: PROFILES_BUNDLE_APP,
+    schemaVersion: SCHEMA_VERSION,
+    exportedAt: now(),
+    me: fileMe ? { name: fileMe.name, background: fileMe.background } : {},
+    categories: fileCategories.map(({ name, description, reveal }) => ({ name, description, reveal })),
+    profiles: fileProfiles.map(({ id, ...rest }) => rest),
+    memes: fileMemes.slice(),
+  };
+}
+
+/** 校验一份档案包；ok 时附带条目数量供确认 */
+export function buildProfilesImportPreview(parsed) {
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, error: '内容不是有效的 JSON 对象' };
+  }
+  if (parsed.app !== PROFILES_BUNDLE_APP) {
+    return { ok: false, error: '这不是档案文件（应该是「导出档案」下载的那份 JSON）' };
+  }
+  if (typeof parsed.schemaVersion === 'number' && parsed.schemaVersion > SCHEMA_VERSION) {
+    return { ok: false, error: '档案来自更新版本的应用，请先升级本页面' };
+  }
+  const count = (v) => (Array.isArray(v) ? v.length : 0);
+  return {
+    ok: true,
+    incoming: {
+      profiles: count(parsed.profiles),
+      categories: count(parsed.categories),
+      memes: count(parsed.memes),
+      hasMe: !!(parsed.me && cleanStr(parsed.me.background).trim()),
+    },
+    current: { profiles: fileProfiles.length, categories: fileCategories.length },
+  };
+}
+
+/**
+ * 存下并立即启用导入的档案（调用前先经 buildProfilesImportPreview 校验）。
+ * 本机有档案文件时文件仍然优先，这份只是存着，供没有文件的设备使用。
+ */
+export function importProfilesBundle(parsed) {
+  write(KEYS.profilesImport, {
+    me: parsed.me || {},
+    categories: Array.isArray(parsed.categories) ? parsed.categories : [],
+    profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
+    memes: Array.isArray(parsed.memes) ? parsed.memes : [],
+    importedAt: now(),
+  });
+  if (dataSource !== 'file') {
+    applyLocalData(parsed);
+    dataSource = 'imported';
+  }
+}
+
+/** 导入副本的导入时间（没有则 null） */
+export function getImportedAt() {
+  const doc = read(KEYS.profilesImport, null);
+  return doc && doc.importedAt ? doc.importedAt : null;
+}
+
+/** 删除本设备上导入的档案副本 */
+export function clearImportedProfiles() {
+  rawRemove(KEYS.profilesImport);
+  if (dataSource === 'imported') {
+    applyLocalData({});
+    dataSource = 'none';
+  }
 }
 
 /** 我的档案：{name, background} | null */
@@ -466,7 +571,14 @@ export function importData(parsed) {
   // 会话草稿里选中的人物可能已不存在，交由 resolvePersona 兜底，无需清空草稿
 }
 
-/** 清空全部数据（含 key、草稿、锁屏；不动 data/profiles.js 文件） */
+/**
+ * 清空全部数据（含 key、草稿、锁屏）。
+ * 不动 data/profiles.js 文件，也不动导入的档案副本——档案有自己的「清除」入口，
+ * 这样"清空全部数据不会弄丢档案"在电脑和手机上是同一个承诺。
+ */
 export function clearAll() {
-  for (const key of Object.values(KEYS)) rawRemove(key);
+  for (const key of Object.values(KEYS)) {
+    if (key === KEYS.profilesImport) continue;
+    rawRemove(key);
+  }
 }
