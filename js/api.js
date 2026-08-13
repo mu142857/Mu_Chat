@@ -5,8 +5,7 @@
 
 import {
   buildChatSystemPrompt,
-  buildAssistSystemPrompt,
-  DUAL_MAIN_NOTE,
+  DUAL_NOTE,
   buildSummarySystemPrompt,
   buildSummaryUserMessage,
 } from './prompts.js';
@@ -334,7 +333,7 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings,
-    system: buildChatSystemPrompt(persona, memes, me) + (dual ? DUAL_MAIN_NOTE : ''),
+    system: buildChatSystemPrompt(persona, memes, me) + (dual ? DUAL_NOTE : ''),
     messages: normalizeChatMessages(chat),
     maxTokens: 8192,
     stream: true,
@@ -432,15 +431,15 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
 }
 
 /**
- * 副参谋（双参谋模式）：非流式，只产出 2 个补充候选版本。
- * settings 是副参谋自己的一套（provider/baseUrl/apiKey/model），失败抛 ApiError。
+ * 并行参谋（双参谋模式）：与主参谋拿完全相同的任务，非流式返回完整意见。
+ * settings 是并行参谋自己的一套（provider/baseUrl/apiKey/model），失败抛 ApiError。
  */
-export async function assistChat({ persona, memes, me, chat, settings, abortSignal }) {
+export async function parallelChat({ persona, memes, me, chat, settings, abortSignal }) {
   return callOnce({
-    system: buildAssistSystemPrompt(persona, memes, me),
+    system: buildChatSystemPrompt(persona, memes, me) + DUAL_NOTE,
     messages: normalizeChatMessages(chat),
     settings,
-    maxTokens: 2048,
+    maxTokens: 8192,
     abortSignal,
   });
 }

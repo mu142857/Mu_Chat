@@ -396,8 +396,9 @@ export function getSettings() {
       provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       model: doc.model,
+      assistProvider: doc.assistProvider || (doc.assistApiKey ? 'anthropic' : ''),
       assistApiKey: doc.assistApiKey || '',
-      assistModel: doc.assistModel || 'claude-sonnet-4-6',
+      assistModel: doc.assistModel || '',
     };
   }
   return {
@@ -405,9 +406,12 @@ export function getSettings() {
     provider: doc.provider || DEFAULT_SETTINGS.provider,
     baseUrl: doc.baseUrl !== undefined ? doc.baseUrl : DEFAULT_SETTINGS.baseUrl,
     model: doc.model !== undefined ? doc.model : DEFAULT_SETTINGS.model,
-    // 双参谋：副参谋（Claude）自己的 key 和模型；key 为空 = 未开启
+    // 双参谋：并行参谋自己的服务商/key/模型；provider 或 key 为空 = 未开启
+    // （旧数据只有 key + claude 模型名，补上 provider）
+    assistProvider: doc.assistProvider
+      || (doc.assistApiKey ? 'anthropic' : ''),
     assistApiKey: doc.assistApiKey || '',
-    assistModel: doc.assistModel || 'claude-sonnet-4-6',
+    assistModel: doc.assistModel || '',
   };
 }
 
@@ -529,13 +533,13 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /** 导出全部数据（明确不含 apiKey；档案/类别在 data/profiles.js 文件里，不经这里） */
 export function exportData() {
-  const { provider, baseUrl, model, assistModel } = getSettings();
+  const { provider, baseUrl, model, assistProvider, assistModel } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
     memes: readMemes().items,
-    settings: { provider, baseUrl, model, assistModel },
+    settings: { provider, baseUrl, model, assistProvider, assistModel },
   };
 }
 
@@ -568,7 +572,7 @@ export function importData(parsed) {
   }
   if (parsed.settings && typeof parsed.settings === 'object') {
     const patch = {};
-    for (const k of ['provider', 'baseUrl', 'model', 'assistModel']) {
+    for (const k of ['provider', 'baseUrl', 'model', 'assistProvider', 'assistModel']) {
       if (typeof parsed.settings[k] === 'string') patch[k] = parsed.settings[k];
     }
     if (Object.keys(patch).length) updateSettings(patch);

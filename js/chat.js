@@ -6,7 +6,9 @@
  */
 
 import * as store from './storage.js';
-import { streamChat, assistChat, summarizeConversation, ApiError } from './api.js';
+import {
+  streamChat, parallelChat, summarizeConversation, ApiError, PROVIDER_PRESETS,
+} from './api.js';
 import { TIER_LABELS } from './prompts.js';
 import { parseSegments, renderMarkdown } from './markdown.js';
 import {
@@ -317,7 +319,7 @@ function renderAssistantMessage(card, msg, streaming) {
   }
   if (msg.assist) {
     const sec = el('div', 'assist-section');
-    sec.appendChild(el('div', 'src-label', `✦ ${msg.assist.model} · 补充候选`));
+    sec.appendChild(el('div', 'src-label', `✦ ${msg.assist.model} · 并行意见`));
     const sub = el('div');
     renderAssistantInto(sub, msg.assist.content, false);
     sec.appendChild(sub);
@@ -450,12 +452,12 @@ function apiUserContent(m) {
 }
 
 function buildApiChat() {
-  // 副参谋的候选也拼进上下文，后续「用第二条改一下」这类指代才接得住
+  // 并行参谋的意见也拼进上下文，后续「用第二条改一下」这类指代才接得住
   return session.chat.map((m) => (m.role === 'assistant'
     ? {
       role: 'assistant',
       content: m.assist
-        ? `${m.content}\n\n【另一位参谋（${m.assist.model}）的补充候选】\n${m.assist.content}`
+        ? `${m.content}\n\n【另一位参谋（${m.assist.model}）对同一请求的意见】\n${m.assist.content}`
         : m.content,
     }
     : { role: 'user', content: apiUserContent(m) }));
@@ -547,20 +549,23 @@ async function generate() {
   const me = store.getMe();
   const apiChat = buildApiChat();
 
-  // 双参谋：填了副 key 就并行让 Claude 出 2 条补充候选
-  const assistSettings = settings.assistApiKey
+  // 双参谋：配了并行参谋就把同一任务原样发给它，两边各给完整意见
+  const assistPreset = settings.assistProvider && settings.assistApiKey
+    ? PROVIDER_PRESETS.find((p) => p.id === settings.assistProvider)
+    : null;
+  const assistSettings = assistPreset
     ? {
-      provider: 'anthropic',
-      baseUrl: 'https://api.anthropic.com',
+      provider: assistPreset.protocol,
+      baseUrl: assistPreset.baseUrl,
       apiKey: settings.assistApiKey,
-      model: settings.assistModel || 'claude-sonnet-4-6',
+      model: settings.assistModel || assistPreset.defaultModel,
     }
     : null;
-  const callAssist = (s) => assistChat({
-    persona, memes, me, chat: apiChat, settings: s, abortSignal: abortCtrl.signal,
-  });
   const assistPromise = assistSettings
-    ? callAssist(assistSettings).then(
+    ? parallelChat({
+      persona, memes, me, chat: apiChat, settings: assistSettings,
+      abortSignal: abortCtrl.signal,
+    }).then(
       (text) => ({ ok: true, text, model: assistSettings.model }),
       (e) => ({ ok: false, e }),
     )
@@ -584,19 +589,12 @@ async function generate() {
     return msg;
   };
 
-  /** 主参谋完成后等副参谋；Claude 挂了就让 Gemini 按副参谋提示词补位 */
+  /** 主参谋完成后等并行参谋的完整意见；失败只提示，不补位（主意见已完整） */
   const attachAssist = async (msg) => {
-    const note = el('div', 'typing-note', `✦ ${assistSettings.model} 候选生成中…`);
+    const note = el('div', 'typing-note', `✦ ${assistSettings.model} 并行生成中…`);
     card.appendChild(note);
     if (followStream) scrollToBottom();
-    let r = await assistPromise;
-    if (!r.ok && !(r.e instanceof ApiError && r.e.kind === 'aborted')) {
-      note.textContent = `✦ ${assistSettings.model} 失败，${settings.model} 补位中…`;
-      r = await callAssist(settings).then(
-        (text) => ({ ok: true, text, model: `${settings.model}（补位）` }),
-        (e) => ({ ok: false, e }),
-      );
-    }
+    const r = await assistPromise;
     note.remove();
     if (r.ok) {
       msg.assist = { model: r.model, content: r.text };
@@ -604,7 +602,8 @@ async function generate() {
       renderAssistantMessage(card, msg, false);
       if (followStream) scrollToBottom();
     } else if (!(r.e instanceof ApiError && r.e.kind === 'aborted')) {
-      showToast('补充候选生成失败：' + (r.e instanceof ApiError ? r.e.userMessage : '请重试'), { duration: 3000 });
+      showToast(`✦ ${assistSettings.model} 这轮失败了：`
+        + (r.e instanceof ApiError ? r.e.userMessage : '请重试'), { duration: 3500 });
     }
   };
 

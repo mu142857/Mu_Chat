@@ -684,57 +684,118 @@ function renderSettingsSection() {
   urlRow.appendChild(urlInput);
   section.appendChild(urlRow);
 
-  // 双参谋：Claude 副 key（可选）。填了之后每轮由 Claude 并行补 2 条候选
-  const assistRow = el('div', 'settings-row');
-  const assistLeft = el('div');
-  assistLeft.appendChild(el('div', 'row-label', '双参谋 · Claude Key'));
-  assistLeft.appendChild(el('div', 'row-value', settings.assistApiKey
-    ? maskKey(settings.assistApiKey)
-    : '选填。填了之后每轮回复由 Claude 并行补 2 条候选'));
-  assistRow.appendChild(assistLeft);
-  const assistBtns = el('div', 'row-btns');
-  const btnAssistKey = el('button', 'btn-small', settings.assistApiKey ? '更换' : '设置');
-  btnAssistKey.addEventListener('click', async () => {
-    const key = await promptApiKey({ message: '填 Claude（Anthropic）的 API Key，开启双参谋。' });
-    if (!key) return;
-    store.updateSettings({ assistApiKey: key });
-    renderSettingsSection();
-    showToast('双参谋已开启');
-  });
-  assistBtns.appendChild(btnAssistKey);
-  if (settings.assistApiKey) {
-    const btnAssistClear = el('button', 'btn-small', '清除');
-    btnAssistClear.addEventListener('click', async () => {
-      const yes = await confirmDialog({ title: '关闭双参谋并清除 Claude Key？', confirmText: '清除', danger: true });
-      if (!yes) return;
-      store.updateSettings({ assistApiKey: '' });
-      renderSettingsSection();
-      showToast('已关闭');
-    });
-    assistBtns.appendChild(btnAssistClear);
-  }
-  assistRow.appendChild(assistBtns);
-  section.appendChild(assistRow);
+  // 双参谋：并行参谋（可选）。同一任务发给两家，各出完整分析 + 3 个版本
+  const assistPreset = PROVIDER_PRESETS.find((p) => p.id === settings.assistProvider) || null;
 
-  if (settings.assistApiKey) {
+  const apRow = el('div', 'settings-row');
+  const apLeft = el('div');
+  apLeft.appendChild(el('div', 'row-label', '双参谋 · 并行服务商'));
+  apLeft.appendChild(el('div', 'row-value', '同一请求并行发给第二家，对照着挑'));
+  apRow.appendChild(apLeft);
+  const apSelect = el('select');
+  const offOpt = el('option', '', '关闭');
+  offOpt.value = '';
+  if (!assistPreset) offOpt.selected = true;
+  apSelect.appendChild(offOpt);
+  for (const p of PROVIDER_PRESETS) {
+    if (p.id === 'custom') continue;
+    const opt = el('option', '', p.name);
+    opt.value = p.id;
+    if (assistPreset && p.id === assistPreset.id) opt.selected = true;
+    apSelect.appendChild(opt);
+  }
+  apSelect.addEventListener('change', () => {
+    const preset = PROVIDER_PRESETS.find((p) => p.id === apSelect.value);
+    if (!preset) {
+      store.updateSettings({ assistProvider: '', assistApiKey: '', assistModel: '' });
+      showToast('双参谋已关闭');
+    } else {
+      store.updateSettings({
+        assistProvider: preset.id,
+        assistApiKey: '',
+        assistModel: preset.defaultModel,
+      });
+      showToast(`并行参谋切到 ${preset.name}，请设置它的 API Key`, { duration: 3000 });
+    }
+    renderSettingsSection();
+  });
+  apRow.appendChild(apSelect);
+  section.appendChild(apRow);
+
+  if (assistPreset) {
+    // 并行参谋的 Key
+    const akRow = el('div', 'settings-row');
+    const akLeft = el('div');
+    akLeft.appendChild(el('div', 'row-label', '并行参谋 API Key'));
+    akLeft.appendChild(el('div', 'row-value', settings.assistApiKey
+      ? maskKey(settings.assistApiKey)
+      : '还没设置，设置后双参谋才生效'));
+    akRow.appendChild(akLeft);
+    const akBtns = el('div', 'row-btns');
+    const btnAk = el('button', 'btn-small', settings.assistApiKey ? '更换' : '设置');
+    btnAk.addEventListener('click', async () => {
+      const key = await promptApiKey({ message: `填 ${assistPreset.name} 的 API Key。` });
+      if (!key) return;
+      store.updateSettings({ assistApiKey: key });
+      renderSettingsSection();
+      showToast('双参谋已开启');
+    });
+    akBtns.appendChild(btnAk);
+    if (settings.assistApiKey) {
+      const btnAkClear = el('button', 'btn-small', '清除');
+      btnAkClear.addEventListener('click', async () => {
+        const yes = await confirmDialog({ title: '清除并行参谋的 API Key？', confirmText: '清除', danger: true });
+        if (!yes) return;
+        store.updateSettings({ assistApiKey: '' });
+        renderSettingsSection();
+        showToast('已清除');
+      });
+      akBtns.appendChild(btnAkClear);
+    }
+    akRow.appendChild(akBtns);
+    section.appendChild(akRow);
+
+    // 并行参谋的模型
     const amRow = el('div', 'settings-row');
     const amLeft = el('div');
-    amLeft.appendChild(el('div', 'row-label', '副参谋模型'));
-    amLeft.appendChild(el('div', 'row-value', '只出候选不做分析，快的型号就够'));
+    amLeft.appendChild(el('div', 'row-label', '并行参谋模型'));
+    amLeft.appendChild(el('div', 'row-value', '随时可换，换完立刻生效'));
     amRow.appendChild(amLeft);
-    const amSelect = el('select');
-    const claudeModels = (PROVIDER_PRESETS.find((p) => p.id === 'anthropic') || {}).models || [];
-    for (const m of claudeModels) {
-      const opt = el('option', '', `${m.id} — ${m.note}`);
-      opt.value = m.id;
-      if (m.id === settings.assistModel) opt.selected = true;
-      amSelect.appendChild(opt);
-    }
-    amSelect.addEventListener('change', () => {
-      store.updateSettings({ assistModel: amSelect.value });
-      showToast('已切换到 ' + amSelect.value);
+    const amModels = assistPreset.models || [];
+    const amInput = el('input');
+    amInput.value = settings.assistModel || '';
+    amInput.placeholder = '模型 ID';
+    amInput.addEventListener('change', () => {
+      store.updateSettings({ assistModel: amInput.value.trim() });
+      showToast('已保存');
     });
-    amRow.appendChild(amSelect);
+    if (amModels.length) {
+      const amSelect = el('select');
+      const amListed = amModels.some((m) => m.id === settings.assistModel);
+      for (const m of amModels) {
+        const opt = el('option', '', `${m.id} — ${m.note}`);
+        opt.value = m.id;
+        if (m.id === settings.assistModel) opt.selected = true;
+        amSelect.appendChild(opt);
+      }
+      const amCustom = el('option', '', '自定义…');
+      amCustom.value = '';
+      if (!amListed) amCustom.selected = true;
+      amSelect.appendChild(amCustom);
+      amSelect.addEventListener('change', () => {
+        if (!amSelect.value) {
+          amInput.hidden = false;
+          amInput.focus();
+          return;
+        }
+        store.updateSettings({ assistModel: amSelect.value });
+        showToast('已切换到 ' + amSelect.value);
+        renderSettingsSection();
+      });
+      amRow.appendChild(amSelect);
+      amInput.hidden = amListed;
+    }
+    amRow.appendChild(amInput);
     section.appendChild(amRow);
   }
 
