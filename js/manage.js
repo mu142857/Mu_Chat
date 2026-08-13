@@ -84,7 +84,8 @@ function buildSourceCard() {
   if (source === 'file') {
     wrap.appendChild(el('div', 'file-hint',
       '📁 档案存在本地文件 data/profiles.js 里：直接改文件，或叫 Claude 改，保存后刷新本页生效。\n'
-      + '要在手机上用，点「导出档案」拿到一份 JSON，传到手机后在线上版里导入。'));
+      + '要在手机上用，把 data/profiles.js 传到手机后在线上版里导入即可；'
+      + '不方便传文件就点「导出档案」拿一份 JSON，内容也能直接粘贴。'));
   } else if (source === 'imported') {
     const at = store.getImportedAt();
     wrap.appendChild(el('div', 'file-hint',
@@ -94,7 +95,7 @@ function buildSourceCard() {
     wrap.appendChild(el('div', 'file-hint',
       '📭 这台设备还没有档案。\n'
       + '电脑上：把 data/profiles.example.js 复制成 data/profiles.js 再填内容（或叫 Claude 建）。\n'
-      + '手机 / 线上版：在电脑上点「导出档案」，把 JSON 传过来，再点下面的「导入档案」。'));
+      + '手机 / 线上版：把电脑上的 data/profiles.js 传过来（或用「导出档案」的 JSON），点下面的「导入档案」。'));
     const err = store.getFileLoadError();
     if (err) {
       wrap.appendChild(el('div', 'empty-hint',
@@ -142,27 +143,64 @@ function onExportProfiles() {
   showToast('已导出。这份文件含全部私人内容，只传给自己的设备', { duration: 4000 });
 }
 
-/** 导入档案：选文件或直接粘贴 JSON（手机上粘贴往往比传文件方便） */
+/**
+ * 把导入内容解析成档案包。两种都收：
+ * 「导出档案」下载的 JSON，或者档案文件 data/profiles.js 本身（直接拷过来最省事）。
+ */
+async function parseProfilesImportText(text) {
+  try {
+    return { ok: true, parsed: JSON.parse(text) };
+  } catch {
+    // 不是 JSON，当 profiles.js 试试
+  }
+  if (!/export\s+(const|let|var)\s+(profiles|me|categories|memes)\b/.test(text)) {
+    return { ok: false, error: '内容既不是导出的 JSON，也不像 data/profiles.js 文件' };
+  }
+  // profiles.js 是 ES 模块，用 blob 当模块加载即可拿到 export（应用启动时读文件走的也是这条路）
+  let url = '';
+  try {
+    url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    const mod = await import(url);
+    return {
+      ok: true,
+      parsed: {
+        app: 'muchat-profiles',
+        schemaVersion: 1,
+        me: mod.me || {},
+        categories: mod.categories || [],
+        profiles: mod.profiles || [],
+        memes: mod.memes || [],
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: `profiles.js 没能解析：${e && e.message ? e.message : '未知错误'}` };
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
+/** 导入档案：选文件或直接粘贴（手机上粘贴往往比传文件方便） */
 function openProfilesImportDialog() {
   const root = document.getElementById('modal-root');
   const overlay = el('div', 'overlay center');
   const dialog = el('div', 'dialog summary-dialog');
   dialog.appendChild(el('div', 'dialog-title', '导入档案'));
   dialog.appendChild(el('div', 'dialog-body',
-    '在电脑上点「导出档案」得到一份 JSON。把它传到这台设备后选择文件，\n'
-    + '或者直接把 JSON 内容粘进下面的框里。数据只存在这台设备的浏览器里，不会上传。'));
+    '两种都能导：电脑上的档案文件 data/profiles.js，或者「导出档案」下载的 JSON。\n'
+    + '把文件传到这台设备后选择它，或者直接把文件内容粘进下面的框里。\n'
+    + '数据只存在这台设备的浏览器里，不会上传；只导入你自己做的文件。'));
 
   const fileInput = el('input');
   fileInput.type = 'file';
-  fileInput.accept = '.json,application/json';
+  fileInput.accept = '.js,.json,text/javascript,application/json,text/plain';
   fileInput.style.display = 'none';
-  const btnPick = el('button', 'btn-secondary', '选择 JSON 文件');
+  const btnPick = el('button', 'btn-secondary', '选择文件（.js 或 .json）');
   btnPick.addEventListener('click', () => fileInput.click());
   dialog.appendChild(btnPick);
   dialog.appendChild(fileInput);
 
   const ta = el('textarea');
-  ta.placeholder = '或把导出的 JSON 内容粘贴到这里…';
+  ta.placeholder = '或把 profiles.js / 导出 JSON 的内容整个粘贴到这里…';
   dialog.appendChild(ta);
 
   const actions = el('div', 'dialog-actions');
@@ -194,13 +232,9 @@ function openProfilesImportDialog() {
   btnOk.addEventListener('click', async () => {
     const text = ta.value.trim();
     if (!text) { showToast('先选择文件或粘贴内容'); return; }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      showToast('内容不是有效的 JSON');
-      return;
-    }
+    const read = await parseProfilesImportText(text);
+    if (!read.ok) { showToast(read.error, { duration: 4000 }); return; }
+    const parsed = read.parsed;
     const preview = store.buildProfilesImportPreview(parsed);
     if (!preview.ok) { showToast(preview.error, { duration: 3000 }); return; }
     close();

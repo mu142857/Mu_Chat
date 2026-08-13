@@ -3,3 +3,9 @@
 
 # 朋友档案是私人数据，只留在本机（要在别的机器用就手动拷贝 data/profiles.js）
 data/profiles.js
+
+# 保险：档案不管被拷到哪个子目录、导出成什么名字，都不许进仓库。
+# （仓库是公开的，GitHub Pages 网址人人可访问，档案一旦提交等于公开发布）
+**/profiles.js
+**/muchat-profiles*.json
+!data/profiles.example.js
