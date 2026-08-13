@@ -134,6 +134,7 @@ function renderPersona() {
     const btn = el('button', 'persona-select-btn', '👤 选择对象 ▾');
     btn.addEventListener('click', openPicker);
     area.appendChild(btn);
+    area.appendChild(buildLangToggle());
     return;
   }
 
@@ -158,6 +159,21 @@ function renderPersona() {
   chip.appendChild(change);
   chip.appendChild(remove);
   area.appendChild(chip);
+  area.appendChild(buildLangToggle());
+}
+
+/** 生成的消息用中文还是英文（分析永远中文）。跟对象无关，随手切，设置里持久化 */
+function buildLangToggle() {
+  const isEn = store.getSettings().replyLang === 'en';
+  const btn = el('button', 'lang-toggle' + (isEn ? ' en' : ''), isEn ? 'EN 英文回复' : '中 中文回复');
+  btn.type = 'button';
+  btn.title = '切换生成消息的语言（分析始终是中文）';
+  btn.addEventListener('click', () => {
+    store.updateSettings({ replyLang: isEn ? 'zh' : 'en' });
+    renderPersona();
+    showToast(isEn ? '之后生成的消息用中文' : '之后生成的消息用英文（分析仍是中文）');
+  });
+  return btn;
 }
 
 function openPicker() {

@@ -13,7 +13,7 @@ export const TIER_GUIDANCE = {
 
 /* ---------- 聊天式参谋 ---------- */
 
-export function buildChatSystemPrompt(persona, memes = [], me = null) {
+export function buildChatSystemPrompt(persona, memes = [], me = null, replyLang = 'zh') {
   return `你是用户的微信社交参谋兼回复代笔——一个懂人情世故、会说话的靠谱朋友。用户会把微信聊天记录和实际情况告诉你，你帮他看清局面、拿捏分寸、写出能直接发出去的回复。
 
 这是连续的多轮咨询：用户随时会补充对方的新回复、让你改措辞、追问策略，默认都是同一件事的延续。
@@ -23,7 +23,7 @@ export function buildChatSystemPrompt(persona, memes = [], me = null) {
 - 【我说】：用户的想法、要求或追问，可能单独出现。
 缺关键信息影响判断时，直接问用户。
 
-${buildPersonaSection(persona)}${buildMeSection(me, persona)}${buildMemesSection(memes)}
+${buildPersonaSection(persona)}${buildMeSection(me, persona)}${buildLangSection(replyLang)}${buildMemesSection(memes)}
 
 【输出格式】
 1. 凡是可以直接发给对方的消息，一律放进 msg 代码块，每条气泡一个块：
@@ -113,6 +113,24 @@ export function buildSummaryUserMessage({ persona, chat }) {
 const MEMES_PER_CALL = 12;
 
 /** 每次随机抽一批，回复风格有变化、也省 token */
+/**
+ * 消息语言。默认中文时整段省略（不浪费 token、也不给模型多余的自由度）；
+ * 切到英文时只改 msg 块的语言，块外的分析仍然是中文——用户是中文母语，要看得懂分析。
+ */
+function buildLangSection(replyLang) {
+  if (replyLang !== 'en') return '';
+  return `
+
+【本次消息用英语写】
+msg 代码块里的内容一律用英语；块外给用户看的分析、说明、版本小标题继续用中文。
+英语要写成真人发消息的样子：短句、口语、可以用缩写（i'm、gonna、lol、haha），
+句首不必大写、句尾可以不加句号，就像在手机上打字。
+禁止书面语和作文腔：Furthermore、I hope this message finds you、It is my pleasure 这类一律不许出现，
+也不要用 ChatGPT 味的万能句式（"That sounds amazing!" "I'd love to hear more about that!" 连着堆）。
+人物设定和梗库里的中文内容只作为背景理解，不要直译成英文塞进消息里。
+用户在【我说】里明确要求用中文时，以用户的要求为准。`;
+}
+
 function buildMemesSection(memes) {
   const pool = (memes || []).filter(Boolean);
   if (!pool.length) return '';

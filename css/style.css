@@ -133,7 +133,31 @@ textarea:focus, input:focus { border-color: var(--green); }
 .btn-small:active { background: var(--bg); }
 
 /* ===== 人物选择区 ===== */
-.persona-area { margin-bottom: 12px; }
+.persona-area {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 消息语言开关：中文时低调，英文时高亮提醒——发错语言是硬故障 */
+.lang-toggle {
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.lang-toggle.en {
+  border-color: #bfe8d0;
+  background: var(--green-bg);
+  color: var(--green-dark);
+  font-weight: 600;
+}
+.lang-toggle:active { background: var(--bg); }
 
 .persona-select-btn {
   display: inline-flex;

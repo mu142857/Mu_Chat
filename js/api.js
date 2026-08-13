@@ -333,7 +333,7 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings,
-    system: buildChatSystemPrompt(persona, memes, me) + (dual ? DUAL_NOTE : ''),
+    system: buildChatSystemPrompt(persona, memes, me, settings.replyLang) + (dual ? DUAL_NOTE : ''),
     messages: normalizeChatMessages(chat),
     maxTokens: 8192,
     stream: true,
@@ -436,7 +436,7 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
  */
 export async function parallelChat({ persona, memes, me, chat, settings, abortSignal }) {
   return callOnce({
-    system: buildChatSystemPrompt(persona, memes, me) + DUAL_NOTE,
+    system: buildChatSystemPrompt(persona, memes, me, settings.replyLang) + DUAL_NOTE,
     messages: normalizeChatMessages(chat),
     settings,
     maxTokens: 8192,

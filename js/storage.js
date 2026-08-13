@@ -169,6 +169,34 @@ export async function loadLocalData() {
   dataSource = 'none';
 }
 
+/**
+ * 内置人物类别：写死在代码里，随应用一起发布，所以任何设备（手机上的线上版）
+ * 不导入档案也能直接用。注意仓库是公开的——这里只能写通用打法，
+ * 任何私人信息（真名、学校、成就、个人经历）都必须留在 data/profiles.js 里。
+ * 档案文件里出现同名类别时以文件为准（覆盖内置）。
+ */
+const BUILTIN_CATEGORIES = [
+  {
+    name: 'Hinge女生',
+    description:
+      '约会软件（Hinge）上匹配到的女生，直接认识、没有共同朋友做背书。' +
+      '双方都清楚这是奔着约会来的，所以不用假装偶遇，但也别一上来就热情过头。' +
+      '基调：轻、短、有来有回，像两个还不熟但聊得来的人在互相试探。' +
+      '开场从她主页里的具体一点切入（照片里的地方、她写的 prompt、她提到的爱好），' +
+      '绝不用 hey / how are you / 在吗 这种零信息开场。' +
+      '夸要夸具体的东西——她做的事、她的品味、她刚说的那句话；' +
+      '夸长相（"你好漂亮"这类）廉价且掉价，除非她自己先把话题引过去。' +
+      '不查户口、不连环追问、不长篇大论、不过早交心。消息比她的略短或持平，别把天聊成采访。' +
+      '聊出共同点、气氛松弛之后，自然地把线下提出来（咖啡、散步这种低压力、短时长的），' +
+      '别拖太久变成笔友——约会软件上拖着聊等于慢性死亡。' +
+      '她回复变短、变慢、变敷衍时，绝不加倍热情去追，降频、给台阶，或者干脆收，' +
+      '追得越紧越掉价。',
+    reveal:
+      '不主动倒自己的履历和成就，她问起再说，说完一句就把话头递回去。' +
+      '私人信息（具体住处、学校细节、社交账号、工作单位）循序渐进，头几轮别全交出去。',
+  },
+];
+
 /** 'file' | 'imported' | 'none' */
 export function getDataSource() {
   return dataSource;
@@ -258,18 +286,29 @@ export function getMe() {
   return fileMe;
 }
 
+/** 档案文件里的类别在前，内置类别补在后面；同名时文件覆盖内置 */
 export function listCategories() {
-  return fileCategories.slice();
+  const fileNames = new Set(fileCategories.map((c) => c.name));
+  const builtin = BUILTIN_CATEGORIES
+    .filter((c) => !fileNames.has(c.name))
+    .map((c) => ({
+      id: 'ct_' + c.name,
+      name: c.name,
+      description: c.description,
+      reveal: c.reveal,
+      builtin: true,
+    }));
+  return [...fileCategories, ...builtin];
 }
 
 export function getCategory(id) {
-  return fileCategories.find((c) => c.id === id) || null;
+  return listCategories().find((c) => c.id === id) || null;
 }
 
 function getCategoryByName(name) {
   const n = cleanStr(name).trim();
   if (!n) return null;
-  return fileCategories.find((c) => c.name === n) || null;
+  return listCategories().find((c) => c.name === n) || null;
 }
 
 export function listProfiles() {
@@ -399,6 +438,7 @@ export function getSettings() {
       assistProvider: doc.assistProvider || (doc.assistApiKey ? 'anthropic' : ''),
       assistApiKey: doc.assistApiKey || '',
       assistModel: doc.assistModel || '',
+      replyLang: doc.replyLang === 'en' ? 'en' : 'zh',
     };
   }
   return {
@@ -412,6 +452,8 @@ export function getSettings() {
       || (doc.assistApiKey ? 'anthropic' : ''),
     assistApiKey: doc.assistApiKey || '',
     assistModel: doc.assistModel || '',
+    // 生成的微信消息用什么语言写（块外的分析永远是中文）：'zh' | 'en'
+    replyLang: doc.replyLang === 'en' ? 'en' : 'zh',
   };
 }
 
