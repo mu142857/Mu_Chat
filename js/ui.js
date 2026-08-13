@@ -161,7 +161,7 @@ export async function copyText(text) {
 
 /**
  * openPersonaPicker({onSelect})
- * onSelect({type:'profile'|'preset', id}) 在用户选中（或快捷新建后）调用。
+ * onSelect({type:'profile'|'category', id}) 在用户选中后调用。
  */
 export function openPersonaPicker({ onSelect }) {
   const overlay = openOverlay();
@@ -174,7 +174,7 @@ export function openPersonaPicker({ onSelect }) {
   const head = el('div', 'sheet-head');
   head.appendChild(el('div', 'sheet-title', '选择对象'));
   const search = el('input');
-  search.placeholder = '搜索档案或预设';
+  search.placeholder = '搜索档案或类别';
   head.appendChild(search);
   sheet.appendChild(head);
 
@@ -183,7 +183,7 @@ export function openPersonaPicker({ onSelect }) {
 
   const foot = el('div', 'sheet-foot');
   foot.appendChild(el('div', 'sheet-foot-hint',
-    '建新档案：编辑 data/profiles.js 文件（或叫 Claude 建）；临时对象可先用预设身份'));
+    '建新档案、改类别：编辑 data/profiles.js 文件（或叫 Claude 改）；还没建档案的人先用类别'));
   sheet.appendChild(foot);
 
   function pick(ref) {
@@ -197,7 +197,7 @@ export function openPersonaPicker({ onSelect }) {
     const match = (name) => !kw || name.toLowerCase().includes(kw);
 
     const profiles = store.listProfiles().filter((p) => match(p.name));
-    const presets = store.listPresets().filter((s) => match(s.name));
+    const categories = store.listCategories().filter((c) => match(c.name));
 
     body.appendChild(el('div', 'list-group-title', '档案'));
     if (!profiles.length) {
@@ -214,17 +214,17 @@ export function openPersonaPicker({ onSelect }) {
       body.appendChild(item);
     }
 
-    body.appendChild(el('div', 'list-group-title', '预设身份'));
-    if (!presets.length) {
-      body.appendChild(el('div', 'list-empty', kw ? '没有匹配的预设' : '还没有预设身份'));
+    body.appendChild(el('div', 'list-group-title', '人物类别'));
+    if (!categories.length) {
+      body.appendChild(el('div', 'list-empty', kw ? '没有匹配的类别' : '还没有人物类别，去 data/profiles.js 里加'));
     }
-    for (const s of presets) {
+    for (const c of categories) {
       const item = el('button', 'list-item');
       const left = el('span');
-      left.appendChild(document.createTextNode(s.name));
-      left.appendChild(el('span', 'tier-badge preset-badge', '预设'));
+      left.appendChild(document.createTextNode(c.name));
+      left.appendChild(el('span', 'tier-badge preset-badge', '类别'));
       item.appendChild(left);
-      item.addEventListener('click', () => pick({ type: 'preset', id: s.id }));
+      item.addEventListener('click', () => pick({ type: 'category', id: c.id }));
       body.appendChild(item);
     }
   }

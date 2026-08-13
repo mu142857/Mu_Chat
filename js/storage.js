@@ -6,7 +6,7 @@
 
 const KEYS = {
   profiles: 'muchat.profiles',      // 旧版遗留：档案已迁到 data/profiles.js 文件，此 key 只用于一次性迁移
-  presets: 'muchat.presets',
+  presets: 'muchat.presets',        // 旧版遗留：预设已被文件里的人物类别取代，加载时清除
   settings: 'muchat.settings',
   session: 'muchat.session',
   memes: 'muchat.memes',
@@ -93,6 +93,8 @@ function now() {
 
 /* ---------- 档案（存本地文件 data/profiles.js，页面只读） ---------- */
 
+let fileMe = null;
+let fileCategories = [];
 let fileProfiles = [];
 let fileMemes = [];
 
@@ -105,6 +107,9 @@ function cleanStr(v) {
  * 必须在 app 初始化视图前 await 一次。
  */
 export async function loadLocalData() {
+  // 旧版把预设身份存在 localStorage；已被文件里的人物类别取代，顺手清掉
+  rawRemove(KEYS.presets);
+
   let mod = null;
   try {
     // 带时间戳绕开浏览器的模块缓存，保证"改完文件刷新就生效"
@@ -112,6 +117,18 @@ export async function loadLocalData() {
   } catch {
     return;
   }
+  const meRaw = mod.me && typeof mod.me === 'object' ? mod.me : null;
+  fileMe = meRaw && cleanStr(meRaw.background).trim()
+    ? { name: cleanStr(meRaw.name).trim(), background: cleanStr(meRaw.background).trim() }
+    : null;
+  fileCategories = (Array.isArray(mod.categories) ? mod.categories : [])
+    .filter((c) => c && cleanStr(c.name).trim())
+    .map((c) => ({
+      id: 'ct_' + cleanStr(c.name).trim(),
+      name: cleanStr(c.name).trim(),
+      description: cleanStr(c.description),
+      reveal: cleanStr(c.reveal),
+    }));
   const items = Array.isArray(mod.profiles) ? mod.profiles : [];
   fileProfiles = items
     .filter((p) => p && cleanStr(p.name).trim())
@@ -119,6 +136,7 @@ export async function loadLocalData() {
       id: 'pf_' + cleanStr(p.name).trim(),
       name: cleanStr(p.name).trim(),
       tier: [1, 2, 3].includes(Number(p.tier)) ? Number(p.tier) : 3,
+      category: cleanStr(p.category).trim(),
       interests: cleanStr(p.interests),
       memories: cleanStr(p.memories),
       style: cleanStr(p.style),
@@ -128,6 +146,25 @@ export async function loadLocalData() {
   fileMemes = (Array.isArray(mod.memes) ? mod.memes : [])
     .map((t) => cleanStr(t).trim())
     .filter(Boolean);
+}
+
+/** 我的档案：{name, background} | null */
+export function getMe() {
+  return fileMe;
+}
+
+export function listCategories() {
+  return fileCategories.slice();
+}
+
+export function getCategory(id) {
+  return fileCategories.find((c) => c.id === id) || null;
+}
+
+function getCategoryByName(name) {
+  const n = cleanStr(name).trim();
+  if (!n) return null;
+  return fileCategories.find((c) => c.name === n) || null;
 }
 
 export function listProfiles() {
@@ -221,102 +258,24 @@ export async function verifyLockPassword(password) {
   return (await hashPassword(c.salt, password)) === c.hash;
 }
 
-/* ---------- 预设身份 ---------- */
-
-const DEFAULT_PRESETS = [
-  {
-    name: 'b站男网友',
-    description: '在B站认识的男性网友，因为我发的像素游戏内容认识的，默认他对像素游戏感兴趣。聊天氛围轻松随意，网络用语和梗随便用，可以互相调侃，不用客气也不用热情过头，就像同好之间瞎聊。',
-  },
-  {
-    name: '女神',
-    description: '新认识的好看女生，我想多了解她、增进关系。语气自然友好、可以带一点幽默，表现出对她这个人的兴趣而不只是客套。但务必注意分寸：不油腻、不查户口、不连环追问、不过度殷勤，消息别太长，给她留回复空间。',
-  },
-  {
-    name: '老师/前辈',
-    description: '德高望重的老师或前辈。语气谦虚、尊重、得体，称呼用"您"，措辞完整，不用网络梗、不发表情包轰炸。请教和感谢要诚恳，但不要卑微到谄媚，正常表达即可。',
-  },
-];
-
-function readPresets() {
-  return read(KEYS.presets, { schemaVersion: SCHEMA_VERSION, items: [] });
-}
-
-function writePresets(doc) {
-  write(KEYS.presets, doc);
-}
-
-/** 首次运行播种默认预设；之后即使删光也不再补种 */
-export function ensureDefaultPresets() {
-  if (rawGet(KEYS.presets) !== null) return;
-  const doc = { schemaVersion: SCHEMA_VERSION, items: [] };
-  for (const d of DEFAULT_PRESETS) {
-    doc.items.push({
-      id: 's_' + uuid(),
-      name: d.name,
-      description: d.description,
-      builtin: true,
-      createdAt: now(),
-      updatedAt: now(),
-    });
-  }
-  writePresets(doc);
-}
-
-export function listPresets() {
-  return readPresets().items.slice();
-}
-
-export function getPreset(id) {
-  return readPresets().items.find((s) => s.id === id) || null;
-}
-
-export function createPreset({ name, description = '' }) {
-  const doc = readPresets();
-  const preset = {
-    id: 's_' + uuid(),
-    name: String(name || '').trim(),
-    description,
-    builtin: false,
-    createdAt: now(),
-    updatedAt: now(),
-  };
-  doc.items.push(preset);
-  writePresets(doc);
-  return preset;
-}
-
-export function updatePreset(id, patch) {
-  const doc = readPresets();
-  const s = doc.items.find((x) => x.id === id);
-  if (!s) return null;
-  Object.assign(s, patch, { id: s.id, updatedAt: now() });
-  writePresets(doc);
-  return s;
-}
-
-export function deletePreset(id) {
-  const doc = readPresets();
-  doc.items = doc.items.filter((x) => x.id !== id);
-  writePresets(doc);
-}
-
 /* ---------- 统一取"人物"（素材路由将同样按 {type,id} 引用） ---------- */
 
 /**
- * ref: {type:'profile'|'preset', id} | null
- * -> null | {kind:'profile', profile} | {kind:'preset', preset}
- * 引用悬空（已被删）时返回 null，调用方据此清掉选择。
+ * ref: {type:'profile'|'category', id} | null
+ * -> null | {kind:'profile', profile, category} | {kind:'category', category}
+ * profile 的 category 是其 category 字段解析出的类别对象（没填或没匹配时为 null）。
+ * 引用悬空（已被删；含旧版 'preset' 引用）时返回 null，调用方据此清掉选择。
  */
 export function resolvePersona(ref) {
   if (!ref || !ref.id) return null;
   if (ref.type === 'profile') {
     const profile = getProfile(ref.id);
-    return profile ? { kind: 'profile', profile } : null;
+    if (!profile) return null;
+    return { kind: 'profile', profile, category: getCategoryByName(profile.category) };
   }
-  if (ref.type === 'preset') {
-    const preset = getPreset(ref.id);
-    return preset ? { kind: 'preset', preset } : null;
+  if (ref.type === 'category') {
+    const category = getCategory(ref.id);
+    return category ? { kind: 'category', category } : null;
   }
   return null;
 }
@@ -354,7 +313,7 @@ export function updateSettings(patch) {
 function emptySession() {
   return {
     schemaVersion: SCHEMA_VERSION,
-    selected: null,            // {type:'profile'|'preset', id} | null
+    selected: null,            // {type:'profile'|'category', id} | null
     firstRole: 'them',         // 待发送粘贴框第 i 框角色 = i 偶数取 firstRole，否则相反
     convo: [{ text: '' }],     // 待发送的新消息粘贴框（时间线底部）
     convoMode: 'delta',        // 标记 chat 里 user 轮的 convo 是增量（旧数据是全量快照）
@@ -458,14 +417,13 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /* ---------- 导入导出 / 清空 ---------- */
 
-/** 导出全部数据（明确不含 apiKey；档案在 data/profiles.js 文件里，不经这里） */
+/** 导出全部数据（明确不含 apiKey；档案/类别在 data/profiles.js 文件里，不经这里） */
 export function exportData() {
   const { provider, baseUrl, model } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
-    presets: listPresets(),
     memes: readMemes().items,
     settings: { provider, baseUrl, model },
   };
@@ -482,22 +440,19 @@ export function buildImportPreview(parsed) {
   if (typeof parsed.schemaVersion === 'number' && parsed.schemaVersion > SCHEMA_VERSION) {
     return { ok: false, error: '备份来自更新版本的应用，请先升级本页面' };
   }
-  if (!Array.isArray(parsed.presets)) {
-    return { ok: false, error: '备份文件缺少预设数据' };
-  }
   const incomingMemes = Array.isArray(parsed.memes) ? parsed.memes.length : 0;
   return {
     ok: true,
-    // 旧版备份里的 profiles 不再导入（档案在 data/profiles.js 文件里）
+    // 旧版备份里的 profiles/presets 不再导入（档案和类别在 data/profiles.js 文件里）
     hasLegacyProfiles: Array.isArray(parsed.profiles) && parsed.profiles.length > 0,
-    current: { presets: listPresets().length, memes: readMemes().items.length },
-    incoming: { presets: parsed.presets.length, memes: incomingMemes },
+    hasLegacyPresets: Array.isArray(parsed.presets) && parsed.presets.length > 0,
+    current: { memes: readMemes().items.length },
+    incoming: { memes: incomingMemes },
   };
 }
 
 /** 整体覆盖导入（调用前必须先经 buildImportPreview 校验并由用户确认） */
 export function importData(parsed) {
-  writePresets({ schemaVersion: SCHEMA_VERSION, items: parsed.presets });
   if (Array.isArray(parsed.memes)) {
     write(KEYS.memes, { schemaVersion: SCHEMA_VERSION, items: parsed.memes });
   }

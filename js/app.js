@@ -2,7 +2,7 @@
  * app.js — 入口：初始化数据、两个视图与 tab 切换。
  */
 
-import { ensureDefaultPresets, isPersistent, loadLocalData } from './storage.js';
+import { isPersistent, loadLocalData } from './storage.js';
 import { requireUnlock } from './lock.js';
 import { initChatView } from './chat.js';
 import { initManageView } from './manage.js';
@@ -10,7 +10,6 @@ import { showToast } from './ui.js';
 
 await requireUnlock();
 await loadLocalData();
-ensureDefaultPresets();
 initChatView();
 initManageView();
 

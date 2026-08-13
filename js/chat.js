@@ -99,7 +99,7 @@ export function initChatView() {
     window.addEventListener(evt, () => { followStream = false; }, { passive: true });
   }
 
-  // 档案/预设在管理页被改动后，刷新人物区
+  // 数据在管理页被改动后，刷新人物区
   document.addEventListener('muchat:data-changed', (e) => {
     if (e.detail && e.detail.source === 'chat') return;
     renderPersona();
@@ -140,8 +140,8 @@ function renderPersona() {
     chip.appendChild(el('span', 'chip-name', persona.profile.name));
     chip.appendChild(el('span', 'chip-badge', TIER_LABELS[persona.profile.tier] || ''));
   } else {
-    chip.appendChild(el('span', 'chip-name', persona.preset.name));
-    chip.appendChild(el('span', 'chip-badge', '预设'));
+    chip.appendChild(el('span', 'chip-name', persona.category.name));
+    chip.appendChild(el('span', 'chip-badge', '类别'));
   }
   const change = el('button', 'chip-remove', '⇄');
   change.title = '更换对象';
@@ -521,8 +521,9 @@ async function generate() {
   };
 
   const memes = store.listMemes().map((m) => m.text);
+  const me = store.getMe();
   const doCall = () => streamChat({
-    persona, memes, chat: buildApiChat(), settings, onDelta,
+    persona, memes, me, chat: buildApiChat(), settings, onDelta,
     abortSignal: abortCtrl.signal,
   });
 

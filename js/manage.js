@@ -1,6 +1,6 @@
 /**
- * manage.js — 档案管理页：档案（只读，数据在 data/profiles.js 文件里）、预设身份、梗库、
- * 设置（key/模型/锁屏/导入导出/清空）。
+ * manage.js — 档案管理页：档案 / 我的档案 / 人物类别（都只读，数据在 data/profiles.js 文件里）、
+ * 梗库、设置（key/模型/锁屏/导入导出/清空）。
  */
 
 import * as store from './storage.js';
@@ -9,7 +9,7 @@ import { PROVIDER_PRESETS } from './api.js';
 import { el, showToast, confirmDialog, promptApiKey, fmtRelative } from './ui.js';
 
 let refs = {};
-// 当前展开的项：{type:'profile'|'preset'|'new-preset', id?}
+// 当前展开的项：{type:'profile'|'me'|'category', id?}
 let expanded = null;
 
 export function initManageView() {
@@ -30,7 +30,7 @@ export function initManageView() {
 
 export function refreshManageView() {
   renderProfilesSection();
-  renderPresetsSection();
+  renderMeAndCategoriesSection();
   renderMemesSection();
   renderSettingsSection();
 }
@@ -100,6 +100,7 @@ function buildProfileCard(p) {
 function buildProfileView(p) {
   const view = el('div', 'profile-view');
   const fields = [
+    ['所属类别', p.category],
     ['他关心什么', p.interests],
     ['共同经历和梗', p.memories],
     ['发消息风格', p.style],
@@ -160,6 +161,7 @@ function buildProfilesFileContent(items) {
     '  {',
     `    name: ${js(p.name)},`,
     `    tier: ${[1, 2, 3].includes(Number(p.tier)) ? Number(p.tier) : 3},`,
+    "    category: '',",
     `    interests: ${js(p.interests)},`,
     `    memories: ${js(p.memories)},`,
     `    style: ${js(p.style)},`,
@@ -170,9 +172,13 @@ function buildProfilesFileContent(items) {
   return [
     '/**',
     ' * data/profiles.js — 朋友档案（本地文件，只属于这台电脑）。',
-    ' * 由「旧档案迁移」自动生成。直接编辑本文件或叫 Claude 改，保存后刷新页面生效。',
-    ' * 字段说明见 data/profiles.example.js。',
+    ' * 由「旧档案迁移」自动生成，只含 profiles 和 memes；',
+    ' * me（我的档案）和 categories（人物类别）请参照 data/profiles.example.js 手动补充。',
     ' */',
+    '',
+    'export const me = {};',
+    '',
+    'export const categories = [];',
     '',
     'export const profiles = [',
     entries,
@@ -196,121 +202,88 @@ function downloadFile(filename, content) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-/* ============ 预设身份 ============ */
+/* ============ 我的档案 + 人物类别（只读，数据在 data/profiles.js） ============ */
 
-function renderPresetsSection() {
+function renderMeAndCategoriesSection() {
   const root = refs.presets;
   root.innerHTML = '';
   const section = el('div', 'manage-section');
 
   const head = el('div', 'manage-section-head');
-  head.appendChild(el('h2', '', '预设身份'));
-  const btnNew = el('button', 'btn-secondary', '＋ 新建预设');
-  btnNew.addEventListener('click', () => {
-    expanded = { type: 'new-preset' };
-    renderPresetsSection();
-  });
-  head.appendChild(btnNew);
+  head.appendChild(el('h2', '', '我与人物类别'));
   section.appendChild(head);
 
-  if (expanded && expanded.type === 'new-preset') {
-    const card = el('div', 'entity-card');
-    card.appendChild(buildPresetForm(null));
-    section.appendChild(card);
-  }
+  section.appendChild(el('div', 'file-hint',
+    '📁 「我的档案」和人物类别也存在 data/profiles.js 里：直接改文件或叫 Claude 改，刷新生效。类别用于还没建档案的人；档案里填了 category 就继承该类别的露出策略。'));
 
-  const presets = store.listPresets();
-  if (!presets.length && !(expanded && expanded.type === 'new-preset')) {
-    section.appendChild(el('div', 'empty-hint', '还没有预设身份。预设用于还没建档案的新朋友。'));
-  }
-
-  for (const s of presets) {
+  // 我的档案
+  const me = store.getMe();
+  if (!me) {
+    section.appendChild(el('div', 'empty-hint',
+      '还没写「我的档案」。在 data/profiles.js 的 me.background 里写清你是谁，参谋代笔时才有底。'));
+  } else {
     const card = el('div', 'entity-card');
     const row = el('button', 'entity-row');
     const left = el('span');
-    left.appendChild(document.createTextNode(s.name));
-    left.appendChild(el('span', 'tier-badge preset-badge', '预设'));
+    left.appendChild(document.createTextNode(me.name || '我的档案'));
+    left.appendChild(el('span', 'tier-badge preset-badge', '我'));
     row.appendChild(left);
     row.addEventListener('click', () => {
-      expanded = expanded && expanded.type === 'preset' && expanded.id === s.id
-        ? null
-        : { type: 'preset', id: s.id };
-      renderPresetsSection();
+      expanded = expanded && expanded.type === 'me' ? null : { type: 'me' };
+      renderMeAndCategoriesSection();
     });
     card.appendChild(row);
-    if (expanded && expanded.type === 'preset' && expanded.id === s.id) {
-      card.appendChild(buildPresetForm(s));
+    if (expanded && expanded.type === 'me') {
+      const view = el('div', 'profile-view');
+      view.appendChild(el('div', 'field-label', '完整背景（只给参谋看，对外按露出策略）'));
+      view.appendChild(el('div', 'field-text', me.background));
+      card.appendChild(view);
+    }
+    section.appendChild(card);
+  }
+
+  // 人物类别
+  const categories = store.listCategories();
+  if (!categories.length) {
+    section.appendChild(el('div', 'empty-hint',
+      '还没有人物类别。在 data/profiles.js 的 categories 里加，或叫 Claude 帮你写。'));
+  }
+  for (const c of categories) {
+    const card = el('div', 'entity-card');
+    const row = el('button', 'entity-row');
+    const left = el('span');
+    left.appendChild(document.createTextNode(c.name));
+    left.appendChild(el('span', 'tier-badge preset-badge', '类别'));
+    row.appendChild(left);
+    row.addEventListener('click', () => {
+      expanded = expanded && expanded.type === 'category' && expanded.id === c.id
+        ? null
+        : { type: 'category', id: c.id };
+      renderMeAndCategoriesSection();
+    });
+    card.appendChild(row);
+    if (expanded && expanded.type === 'category' && expanded.id === c.id) {
+      const view = el('div', 'profile-view');
+      let hasAny = false;
+      if (c.description && c.description.trim()) {
+        hasAny = true;
+        view.appendChild(el('div', 'field-label', '对方是谁、怎么聊'));
+        view.appendChild(el('div', 'field-text', c.description.trim()));
+      }
+      if (c.reveal && c.reveal.trim()) {
+        hasAny = true;
+        view.appendChild(el('div', 'field-label', '露出策略（对这类人我露什么、藏什么）'));
+        view.appendChild(el('div', 'field-text', c.reveal.trim()));
+      }
+      if (!hasAny) {
+        view.appendChild(el('div', 'empty-hint', '这个类别还没写内容，去 data/profiles.js 里补充。'));
+      }
+      card.appendChild(view);
     }
     section.appendChild(card);
   }
 
   root.appendChild(section);
-}
-
-function buildPresetForm(s) {
-  const form = el('div', 'edit-form');
-
-  form.appendChild(el('div', 'field-label', '名称'));
-  const nameInput = el('input');
-  nameInput.placeholder = '比如：b站男网友';
-  nameInput.value = s ? s.name : '';
-  form.appendChild(nameInput);
-
-  form.appendChild(el('div', 'field-label', '风格与分寸描述'));
-  const descInput = el('textarea');
-  descInput.rows = 5;
-  descInput.placeholder = '这类人是谁、怎么跟他说话、注意什么分寸';
-  descInput.value = s ? s.description : '';
-  form.appendChild(descInput);
-
-  const actions = el('div', 'form-actions');
-  const btnSave = el('button', 'btn-secondary', '保存');
-  btnSave.style.color = 'var(--green-dark)';
-  btnSave.addEventListener('click', () => {
-    const name = nameInput.value.trim();
-    if (!name) { showToast('名称不能为空'); return; }
-    try {
-      if (s) store.updatePreset(s.id, { name, description: descInput.value });
-      else store.createPreset({ name, description: descInput.value });
-    } catch (e) {
-      showToast(e.userMessage || '保存失败');
-      return;
-    }
-    expanded = null;
-    renderPresetsSection();
-    dataChanged();
-    showToast('已保存');
-  });
-  actions.appendChild(btnSave);
-
-  if (s) {
-    const btnDelete = el('button', 'btn-secondary btn-danger', '删除');
-    btnDelete.addEventListener('click', async () => {
-      const yes = await confirmDialog({
-        title: `删除预设「${s.name}」？`,
-        body: '删除后不会自动恢复。',
-        confirmText: '删除',
-        danger: true,
-      });
-      if (!yes) return;
-      store.deletePreset(s.id);
-      expanded = null;
-      renderPresetsSection();
-      dataChanged();
-      showToast('已删除');
-    });
-    actions.appendChild(btnDelete);
-  }
-
-  const btnCollapse = el('button', 'btn-secondary', '收起');
-  btnCollapse.addEventListener('click', () => {
-    expanded = null;
-    renderPresetsSection();
-  });
-  actions.appendChild(btnCollapse);
-
-  form.appendChild(actions);
-  return form;
 }
 
 /* ============ 梗库 ============ */
@@ -513,7 +486,7 @@ function renderSettingsSection() {
 
   // 导出
   const exportRow = el('div', 'settings-row');
-  exportRow.appendChild(el('div', 'row-label', '导出数据（预设/梗库/设置，不含 Key）'));
+  exportRow.appendChild(el('div', 'row-label', '导出数据（梗库/设置，不含 Key）'));
   const btnExport = el('button', 'btn-small', '导出 JSON');
   btnExport.addEventListener('click', onExport);
   exportRow.appendChild(btnExport);
@@ -544,7 +517,7 @@ function renderSettingsSection() {
   btnClear.addEventListener('click', async () => {
     const yes = await confirmDialog({
       title: '清空全部数据？',
-      body: '预设、梗库、设置、API Key、锁屏、当前对话都会被删除，无法恢复。\n（档案文件 data/profiles.js 不受影响）',
+      body: '梗库、设置、API Key、锁屏、当前对话都会被删除，无法恢复。\n（档案文件 data/profiles.js 不受影响）',
       confirmText: '确认清空',
       danger: true,
       requireText: '清空',
@@ -645,10 +618,10 @@ function onImport(file) {
     }
     const yes = await confirmDialog({
       title: '确认导入？',
-      body: `当前：${preview.current.presets} 个预设、${preview.current.memes} 条梗\n` +
-        `导入后：${preview.incoming.presets} 个预设、${preview.incoming.memes} 条梗\n\n` +
-        (preview.hasLegacyProfiles
-          ? '备份里的档案不会导入（档案现在存在 data/profiles.js 文件里）。\n' : '') +
+      body: `当前：${preview.current.memes} 条梗\n` +
+        `导入后：${preview.incoming.memes} 条梗\n\n` +
+        (preview.hasLegacyProfiles || preview.hasLegacyPresets
+          ? '备份里的档案/预设不会导入（现在都存在 data/profiles.js 文件里）。\n' : '') +
         '本机数据将被整体覆盖。',
       confirmText: '覆盖导入',
       danger: true,
