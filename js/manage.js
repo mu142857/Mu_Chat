@@ -684,6 +684,60 @@ function renderSettingsSection() {
   urlRow.appendChild(urlInput);
   section.appendChild(urlRow);
 
+  // 双参谋：Claude 副 key（可选）。填了之后每轮由 Claude 并行补 2 条候选
+  const assistRow = el('div', 'settings-row');
+  const assistLeft = el('div');
+  assistLeft.appendChild(el('div', 'row-label', '双参谋 · Claude Key'));
+  assistLeft.appendChild(el('div', 'row-value', settings.assistApiKey
+    ? maskKey(settings.assistApiKey)
+    : '选填。填了之后每轮回复由 Claude 并行补 2 条候选'));
+  assistRow.appendChild(assistLeft);
+  const assistBtns = el('div', 'row-btns');
+  const btnAssistKey = el('button', 'btn-small', settings.assistApiKey ? '更换' : '设置');
+  btnAssistKey.addEventListener('click', async () => {
+    const key = await promptApiKey({ message: '填 Claude（Anthropic）的 API Key，开启双参谋。' });
+    if (!key) return;
+    store.updateSettings({ assistApiKey: key });
+    renderSettingsSection();
+    showToast('双参谋已开启');
+  });
+  assistBtns.appendChild(btnAssistKey);
+  if (settings.assistApiKey) {
+    const btnAssistClear = el('button', 'btn-small', '清除');
+    btnAssistClear.addEventListener('click', async () => {
+      const yes = await confirmDialog({ title: '关闭双参谋并清除 Claude Key？', confirmText: '清除', danger: true });
+      if (!yes) return;
+      store.updateSettings({ assistApiKey: '' });
+      renderSettingsSection();
+      showToast('已关闭');
+    });
+    assistBtns.appendChild(btnAssistClear);
+  }
+  assistRow.appendChild(assistBtns);
+  section.appendChild(assistRow);
+
+  if (settings.assistApiKey) {
+    const amRow = el('div', 'settings-row');
+    const amLeft = el('div');
+    amLeft.appendChild(el('div', 'row-label', '副参谋模型'));
+    amLeft.appendChild(el('div', 'row-value', '只出候选不做分析，快的型号就够'));
+    amRow.appendChild(amLeft);
+    const amSelect = el('select');
+    const claudeModels = (PROVIDER_PRESETS.find((p) => p.id === 'anthropic') || {}).models || [];
+    for (const m of claudeModels) {
+      const opt = el('option', '', `${m.id} — ${m.note}`);
+      opt.value = m.id;
+      if (m.id === settings.assistModel) opt.selected = true;
+      amSelect.appendChild(opt);
+    }
+    amSelect.addEventListener('change', () => {
+      store.updateSettings({ assistModel: amSelect.value });
+      showToast('已切换到 ' + amSelect.value);
+    });
+    amRow.appendChild(amSelect);
+    section.appendChild(amRow);
+  }
+
   // 锁屏
   const lockRow = el('div', 'settings-row');
   const lockLeft = el('div');

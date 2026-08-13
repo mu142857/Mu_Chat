@@ -5,6 +5,8 @@
 
 import {
   buildChatSystemPrompt,
+  buildAssistSystemPrompt,
+  DUAL_MAIN_NOTE,
   buildSummarySystemPrompt,
   buildSummaryUserMessage,
 } from './prompts.js';
@@ -63,17 +65,18 @@ export const PROVIDER_PRESETS = [
   },
   {
     id: 'gemini', name: 'Gemini（Google）', protocol: 'openai',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-pro-latest',
-    // 型号名以账号 ListModels 的实际返回为准（Google 换代快，别凭印象写）
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.7-flash',
+    // 型号名以账号 ListModels 的实际返回为准（Google 换代快，别凭印象写）。
+    // 免费层只放行 flash 系列；pro 系列免费配额为 0（429 limit:0），须绑卡升付费层
     models: [
-      { id: 'gemini-pro-latest', note: '推荐：别名，始终指向当前 pro' },
-      { id: 'gemini-3.1-pro-preview', note: '最强 pro，preview 配额紧' },
-      { id: 'gemini-3.7-flash', note: '最新 flash，快' },
-      { id: 'gemini-3.5-flash', note: '上一代 flash' },
+      { id: 'gemini-3.7-flash', note: '最新 flash，免费层可用' },
+      { id: 'gemini-3.5-flash', note: '上一代 flash，免费层可用' },
       { id: 'gemini-flash-latest', note: '别名，始终指向当前 flash' },
-      { id: 'gemini-2.5-pro', note: '老牌稳定，语感有口碑' },
-      { id: 'gemini-2.5-flash', note: '免费额度最友好' },
+      { id: 'gemini-2.5-flash', note: '老牌 flash，免费额度最宽' },
       { id: 'gemini-flash-lite-latest', note: '最快最省，只适合简单场合' },
+      { id: 'gemini-pro-latest', note: '情商上限更高，需付费层' },
+      { id: 'gemini-3.1-pro-preview', note: '最强 pro，需付费层' },
+      { id: 'gemini-2.5-pro', note: '老牌 pro，需付费层' },
     ],
   },
   {
@@ -154,25 +157,31 @@ function normalizeChatMessages(chat) {
   return out;
 }
 
-/* ---------- 非流式调用（总结用） ---------- */
+/* ---------- 非流式调用（总结、副参谋用） ---------- */
 
-async function callOnce({ system, userMessage, settings, maxTokens }) {
+async function callOnce({ system, userMessage, messages, settings, maxTokens, abortSignal }) {
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings, system, maxTokens,
-    messages: [{ role: 'user', content: userMessage }],
+    messages: messages || [{ role: 'user', content: userMessage }],
     stream: false,
   });
+
+  const signals = [AbortSignal.timeout(TIMEOUT_MS)];
+  if (abortSignal) signals.push(abortSignal);
 
   let resp;
   try {
     resp = await fetch(url, {
       method: 'POST',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.any(signals),
       headers,
       body: JSON.stringify(body),
     });
   } catch (e) {
+    if (abortSignal && abortSignal.aborted) {
+      throw new ApiError('aborted', '已停止');
+    }
     if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
       throw new ApiError('timeout', '请求超时，请重试');
     }
@@ -250,6 +259,10 @@ async function classifyHttpError(resp) {
     case 413:
       return new ApiError('too_large', '对话内容太长了，点「新对话」开一段吧');
     case 429: {
+      // Gemini 免费层对 pro 系列配额为 0，也报 429（limit: 0）——这不是频率问题，重试无用
+      if (/limit:\s*0/.test(serverMsg)) {
+        return new ApiError('forbidden', '当前套餐用不了这个模型（免费层不含 pro 系列），请换模型或升级付费层');
+      }
       const retryAfter = parseInt(resp.headers.get('retry-after'), 10) || 30;
       return new ApiError('rate_limit', `请求太频繁，请 ${retryAfter} 秒后再试`, { retryAfter });
     }
@@ -317,11 +330,11 @@ async function readSSE(resp, onData, onActivity) {
  * 调用方可用自己在 onDelta 里攒下的部分文本兜底）。
  * 成功返回 {text, truncated}。
  */
-export async function streamChat({ persona, memes, me, chat, settings, onDelta, abortSignal }) {
+export async function streamChat({ persona, memes, me, chat, settings, onDelta, abortSignal, dual }) {
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings,
-    system: buildChatSystemPrompt(persona, memes, me),
+    system: buildChatSystemPrompt(persona, memes, me) + (dual ? DUAL_MAIN_NOTE : ''),
     messages: normalizeChatMessages(chat),
     maxTokens: 8192,
     stream: true,
@@ -416,6 +429,20 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
     clearTimeout(idleTimer);
     if (abortSignal) abortSignal.removeEventListener('abort', onUserAbort);
   }
+}
+
+/**
+ * 副参谋（双参谋模式）：非流式，只产出 2 个补充候选版本。
+ * settings 是副参谋自己的一套（provider/baseUrl/apiKey/model），失败抛 ApiError。
+ */
+export async function assistChat({ persona, memes, me, chat, settings, abortSignal }) {
+  return callOnce({
+    system: buildAssistSystemPrompt(persona, memes, me),
+    messages: normalizeChatMessages(chat),
+    settings,
+    maxTokens: 2048,
+    abortSignal,
+  });
 }
 
 /**

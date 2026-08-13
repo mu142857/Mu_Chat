@@ -396,6 +396,8 @@ export function getSettings() {
       provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       model: doc.model,
+      assistApiKey: doc.assistApiKey || '',
+      assistModel: doc.assistModel || 'claude-sonnet-4-6',
     };
   }
   return {
@@ -403,6 +405,9 @@ export function getSettings() {
     provider: doc.provider || DEFAULT_SETTINGS.provider,
     baseUrl: doc.baseUrl !== undefined ? doc.baseUrl : DEFAULT_SETTINGS.baseUrl,
     model: doc.model !== undefined ? doc.model : DEFAULT_SETTINGS.model,
+    // 双参谋：副参谋（Claude）自己的 key 和模型；key 为空 = 未开启
+    assistApiKey: doc.assistApiKey || '',
+    assistModel: doc.assistModel || 'claude-sonnet-4-6',
   };
 }
 
@@ -524,13 +529,13 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /** 导出全部数据（明确不含 apiKey；档案/类别在 data/profiles.js 文件里，不经这里） */
 export function exportData() {
-  const { provider, baseUrl, model } = getSettings();
+  const { provider, baseUrl, model, assistModel } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
     memes: readMemes().items,
-    settings: { provider, baseUrl, model },
+    settings: { provider, baseUrl, model, assistModel },
   };
 }
 
@@ -563,7 +568,7 @@ export function importData(parsed) {
   }
   if (parsed.settings && typeof parsed.settings === 'object') {
     const patch = {};
-    for (const k of ['provider', 'baseUrl', 'model']) {
+    for (const k of ['provider', 'baseUrl', 'model', 'assistModel']) {
       if (typeof parsed.settings[k] === 'string') patch[k] = parsed.settings[k];
     }
     if (Object.keys(patch).length) updateSettings(patch);

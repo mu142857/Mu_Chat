@@ -6,7 +6,7 @@
  */
 
 import * as store from './storage.js';
-import { streamChat, summarizeConversation, ApiError } from './api.js';
+import { streamChat, assistChat, summarizeConversation, ApiError } from './api.js';
 import { TIER_LABELS } from './prompts.js';
 import { parseSegments, renderMarkdown } from './markdown.js';
 import {
@@ -303,9 +303,26 @@ function buildMessageEl(msg, undoIndex = -1) {
   }
   const row = el('div', 'chat-msg assistant');
   const card = el('div', 'assistant-card');
-  renderAssistantInto(card, msg.content, false);
+  renderAssistantMessage(card, msg, false);
   row.appendChild(card);
   return row;
+}
+
+/** 渲染完整的 assistant 消息：主参谋内容 +（双参谋时）来源标注和副参谋补充段 */
+function renderAssistantMessage(card, msg, streaming) {
+  renderAssistantInto(card, msg.content, streaming);
+  if (!msg.model && !msg.assist) return;
+  if (msg.model) {
+    card.insertBefore(el('div', 'src-label', `⚡ ${msg.model}`), card.firstChild);
+  }
+  if (msg.assist) {
+    const sec = el('div', 'assist-section');
+    sec.appendChild(el('div', 'src-label', `✦ ${msg.assist.model} · 补充候选`));
+    const sub = el('div');
+    renderAssistantInto(sub, msg.assist.content, false);
+    sec.appendChild(sub);
+    card.appendChild(sec);
+  }
 }
 
 /** 撤回最后一轮：删掉该条与其后的回复，文字退回输入框、消息退回粘贴框 */
@@ -433,8 +450,14 @@ function apiUserContent(m) {
 }
 
 function buildApiChat() {
+  // 副参谋的候选也拼进上下文，后续「用第二条改一下」这类指代才接得住
   return session.chat.map((m) => (m.role === 'assistant'
-    ? { role: 'assistant', content: m.content }
+    ? {
+      role: 'assistant',
+      content: m.assist
+        ? `${m.content}\n\n【另一位参谋（${m.assist.model}）的补充候选】\n${m.assist.content}`
+        : m.content,
+    }
     : { role: 'user', content: apiUserContent(m) }));
 }
 
@@ -522,20 +545,67 @@ async function generate() {
 
   const memes = store.listMemes().map((m) => m.text);
   const me = store.getMe();
+  const apiChat = buildApiChat();
+
+  // 双参谋：填了副 key 就并行让 Claude 出 2 条补充候选
+  const assistSettings = settings.assistApiKey
+    ? {
+      provider: 'anthropic',
+      baseUrl: 'https://api.anthropic.com',
+      apiKey: settings.assistApiKey,
+      model: settings.assistModel || 'claude-sonnet-4-6',
+    }
+    : null;
+  const callAssist = (s) => assistChat({
+    persona, memes, me, chat: apiChat, settings: s, abortSignal: abortCtrl.signal,
+  });
+  const assistPromise = assistSettings
+    ? callAssist(assistSettings).then(
+      (text) => ({ ok: true, text, model: assistSettings.model }),
+      (e) => ({ ok: false, e }),
+    )
+    : null;
+
   const doCall = () => streamChat({
-    persona, memes, me, chat: buildApiChat(), settings, onDelta,
-    abortSignal: abortCtrl.signal,
+    persona, memes, me, chat: apiChat, settings, onDelta,
+    abortSignal: abortCtrl.signal, dual: !!assistSettings,
   });
 
   const finish = (text) => {
-    session.chat.push({ role: 'assistant', content: text });
+    const msg = { role: 'assistant', content: text, model: assistSettings ? settings.model : null };
+    session.chat.push(msg);
     if (persona && persona.kind === 'profile') {
       store.touchLastContact(persona.profile.id);
       document.dispatchEvent(new CustomEvent('muchat:data-changed', { detail: { source: 'chat' } }));
     }
     persist();
-    renderAssistantInto(card, text, false);
+    renderAssistantMessage(card, msg, false);
     if (followStream) scrollToBottom();
+    return msg;
+  };
+
+  /** 主参谋完成后等副参谋；Claude 挂了就让 Gemini 按副参谋提示词补位 */
+  const attachAssist = async (msg) => {
+    const note = el('div', 'typing-note', `✦ ${assistSettings.model} 候选生成中…`);
+    card.appendChild(note);
+    if (followStream) scrollToBottom();
+    let r = await assistPromise;
+    if (!r.ok && !(r.e instanceof ApiError && r.e.kind === 'aborted')) {
+      note.textContent = `✦ ${assistSettings.model} 失败，${settings.model} 补位中…`;
+      r = await callAssist(settings).then(
+        (text) => ({ ok: true, text, model: `${settings.model}（补位）` }),
+        (e) => ({ ok: false, e }),
+      );
+    }
+    note.remove();
+    if (r.ok) {
+      msg.assist = { model: r.model, content: r.text };
+      persist();
+      renderAssistantMessage(card, msg, false);
+      if (followStream) scrollToBottom();
+    } else if (!(r.e instanceof ApiError && r.e.kind === 'aborted')) {
+      showToast('补充候选生成失败：' + (r.e instanceof ApiError ? r.e.userMessage : '请重试'), { duration: 3000 });
+    }
   };
 
   try {
@@ -554,8 +624,9 @@ async function generate() {
         throw e;
       }
     }
-    finish(result.text);
+    const msg = finish(result.text);
     if (result.truncated) showToast('输出被截断了，内容可能不完整', { duration: 3000 });
+    if (assistPromise) await attachAssist(msg);
   } catch (e) {
     const aborted = e instanceof ApiError && e.kind === 'aborted';
     if (latest.trim()) {

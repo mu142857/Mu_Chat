@@ -71,12 +71,18 @@ js/manage.js             档案管理页（档案/我/类别只读展示、旧�
 | Kimi（月之暗面） | https://platform.moonshot.cn | `kimi-latest` |
 | 通义千问 | 阿里云百炼 https://bailian.console.aliyun.com | `qwen-plus` |
 | OpenAI（GPT） | https://platform.openai.com（需境外支付方式） | `gpt-5-mini` |
-| Gemini（Google） | Google AI Studio https://aistudio.google.com/apikey | `gemini-pro-latest` |
+| Gemini（Google） | Google AI Studio https://aistudio.google.com/apikey（免费层只能用 flash 系列，pro 需绑卡升付费层） | `gemini-3.7-flash` |
 
 每个服务商都带一份常用模型清单，设置里的「模型」是下拉菜单，每项注明快慢／贵贱／语气取向，随时可换。
 清单里没有的型号选「自定义…」手填 ID 即可。
 | Claude（Anthropic） | https://platform.claude.com | `claude-sonnet-4-6` |
 
 也支持"自定义（OpenAI 兼容）"：填任意 OpenAI 兼容接口的地址和模型即可。
+
+### 双参谋模式（选填）
+
+设置里多填一个「双参谋 · Claude Key」即开启：主参谋（上面选的服务商，如 Gemini）照常做分析并给 2 个候选，
+Claude 并行再补 2 个不同气质的候选，追加在同一条回复尾部，每段标注生成模型。追问（改语气、问策略）只走主参谋。
+Claude 那边失败时由主参谋按副参谋的提示词补位再生成 2 条，标注「（补位）」。清除副 Key 即回到单参谋模式。
 
 注意：**豆包（火山方舟）的 API 不允许浏览器跨域**，这种纯前端应用无法直连，所以不在列表里。
