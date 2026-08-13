@@ -19,14 +19,69 @@ const IDLE_TIMEOUT_MS = 90_000;  // 流式请求两次数据之间的最长间�
  * 注意：豆包（火山方舟）不允许浏览器跨域，纯前端应用无法直连，故不在列表中。
  */
 export const PROVIDER_PRESETS = [
-  { id: 'deepseek', name: 'DeepSeek', protocol: 'openai', baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat' },
-  { id: 'zhipu', name: '智谱 GLM', protocol: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.6' },
-  { id: 'kimi', name: 'Kimi（月之暗面）', protocol: 'openai', baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'kimi-latest' },
-  { id: 'qwen', name: '通义千问', protocol: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus' },
-  { id: 'openai', name: 'OpenAI（GPT）', protocol: 'openai', baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5-mini' },
-  { id: 'gemini', name: 'Gemini（Google）', protocol: 'openai', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-flash' },
-  { id: 'anthropic', name: 'Claude（Anthropic）', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-6' },
-  { id: 'custom', name: '自定义（OpenAI 兼容）', protocol: 'openai', baseUrl: '', defaultModel: '' },
+  {
+    id: 'deepseek', name: 'DeepSeek', protocol: 'openai',
+    baseUrl: 'https://api.deepseek.com', defaultModel: 'deepseek-chat',
+    models: [
+      { id: 'deepseek-chat', note: '快、便宜，日常够用' },
+      { id: 'deepseek-reasoner', note: '会先想再答，复杂局面更稳，慢' },
+    ],
+  },
+  {
+    id: 'zhipu', name: '智谱 GLM', protocol: 'openai',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.6',
+    models: [
+      { id: 'glm-4.6', note: '主力，中文语感好' },
+      { id: 'glm-4.5-air', note: '轻量版，更快更便宜' },
+    ],
+  },
+  {
+    id: 'kimi', name: 'Kimi（月之暗面）', protocol: 'openai',
+    baseUrl: 'https://api.moonshot.cn/v1', defaultModel: 'kimi-latest',
+    models: [
+      { id: 'kimi-latest', note: '官方最新，跟着升级' },
+      { id: 'kimi-k2-0905-preview', note: 'K2，长文和推理更强' },
+    ],
+  },
+  {
+    id: 'qwen', name: '通义千问', protocol: 'openai',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-plus',
+    models: [
+      { id: 'qwen-plus', note: '均衡主力' },
+      { id: 'qwen-max', note: '最强一档，贵且慢' },
+      { id: 'qwen-turbo', note: '最快最便宜，语气糙' },
+    ],
+  },
+  {
+    id: 'openai', name: 'OpenAI（GPT）', protocol: 'openai',
+    baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-5-mini',
+    models: [
+      { id: 'gpt-5-mini', note: '性价比主力' },
+      { id: 'gpt-5', note: '最强，分寸感好，贵' },
+      { id: 'gpt-5-nano', note: '最便宜，只适合简单场合' },
+    ],
+  },
+  {
+    id: 'gemini', name: 'Gemini（Google）', protocol: 'openai',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-pro',
+    models: [
+      { id: 'gemini-2.5-pro', note: '推荐：拿捏潜台词和分寸' },
+      { id: 'gemini-3-pro-preview', note: '最强一档，preview 配额紧' },
+      { id: 'gemini-2.5-flash', note: '快且免费额度友好，语气偏套路' },
+      { id: 'gemini-2.5-flash-lite', note: '最快最省，只适合简单场合' },
+    ],
+  },
+  {
+    id: 'anthropic', name: 'Claude（Anthropic）', protocol: 'anthropic',
+    baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-6',
+    models: [
+      { id: 'claude-sonnet-4-6', note: '均衡，中文分寸感稳' },
+      { id: 'claude-sonnet-5', note: '新一代均衡款' },
+      { id: 'claude-opus-5', note: '最强一档，复杂人际局面首选' },
+      { id: 'claude-haiku-4-5-20251001', note: '最快最省' },
+    ],
+  },
+  { id: 'custom', name: '自定义（OpenAI 兼容）', protocol: 'openai', baseUrl: '', defaultModel: '', models: [] },
 ];
 
 export class ApiError extends Error {
