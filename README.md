@@ -71,7 +71,7 @@ js/manage.js             档案管理页（档案/我/类别只读展示、旧�
 | Kimi（月之暗面） | https://platform.moonshot.cn | `kimi-latest` |
 | 通义千问 | 阿里云百炼 https://bailian.console.aliyun.com | `qwen-plus` |
 | OpenAI（GPT） | https://platform.openai.com（需境外支付方式） | `gpt-5-mini` |
-| Gemini（Google） | Google AI Studio https://aistudio.google.com/apikey | `gemini-2.5-pro` |
+| Gemini（Google） | Google AI Studio https://aistudio.google.com/apikey | `gemini-pro-latest` |
 
 每个服务商都带一份常用模型清单，设置里的「模型」是下拉菜单，每项注明快慢／贵贱／语气取向，随时可换。
 清单里没有的型号选「自定义…」手填 ID 即可。

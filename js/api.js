@@ -63,12 +63,17 @@ export const PROVIDER_PRESETS = [
   },
   {
     id: 'gemini', name: 'Gemini（Google）', protocol: 'openai',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-2.5-pro',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-pro-latest',
+    // 型号名以账号 ListModels 的实际返回为准（Google 换代快，别凭印象写）
     models: [
-      { id: 'gemini-2.5-pro', note: '推荐：拿捏潜台词和分寸' },
-      { id: 'gemini-3-pro-preview', note: '最强一档，preview 配额紧' },
-      { id: 'gemini-2.5-flash', note: '快且免费额度友好，语气偏套路' },
-      { id: 'gemini-2.5-flash-lite', note: '最快最省，只适合简单场合' },
+      { id: 'gemini-pro-latest', note: '推荐：别名，始终指向当前 pro' },
+      { id: 'gemini-3.1-pro-preview', note: '最强 pro，preview 配额紧' },
+      { id: 'gemini-3.7-flash', note: '最新 flash，快' },
+      { id: 'gemini-3.5-flash', note: '上一代 flash' },
+      { id: 'gemini-flash-latest', note: '别名，始终指向当前 flash' },
+      { id: 'gemini-2.5-pro', note: '老牌稳定，语感有口碑' },
+      { id: 'gemini-2.5-flash', note: '免费额度最友好' },
+      { id: 'gemini-flash-lite-latest', note: '最快最省，只适合简单场合' },
     ],
   },
   {
