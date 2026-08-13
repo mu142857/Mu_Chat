@@ -83,8 +83,9 @@ function buildSourceCard() {
 
   if (source === 'file') {
     wrap.appendChild(el('div', 'file-hint',
-      '📁 档案存在本地文件 data/profiles.js 里：直接改文件，或叫 Claude 改，保存后刷新本页生效。\n'
-      + '要在手机上用，把 data/profiles.js 传到手机后在线上版里导入即可；'
+      `📁 档案存在本地文件 data/profiles.js 里，本页自动加载（现在 ${store.listProfiles().length} 份）。\n`
+      + '这台设备不需要导入：改文件（或叫 Claude 改）保存后刷新本页就生效。\n'
+      + '要在手机上用，把 data/profiles.js 传到手机后在线上版的「档案」区导入；'
       + '不方便传文件就点「导出档案」拿一份 JSON，内容也能直接粘贴。'));
   } else if (source === 'imported') {
     const at = store.getImportedAt();
@@ -679,7 +680,8 @@ function renderSettingsSection() {
 
   // 导出
   const exportRow = el('div', 'settings-row');
-  exportRow.appendChild(el('div', 'row-label', '导出数据（梗库/设置，不含 Key）'));
+  // 名字必须和上面档案区的「导出/导入档案」拉开距离，否则会被当成档案的入口
+  exportRow.appendChild(el('div', 'row-label', '备份设置和梗库（不含档案、不含 Key）'));
   const btnExport = el('button', 'btn-small', '导出 JSON');
   btnExport.addEventListener('click', onExport);
   exportRow.appendChild(btnExport);
@@ -687,7 +689,8 @@ function renderSettingsSection() {
 
   // 导入
   const importRow = el('div', 'settings-row');
-  importRow.appendChild(el('div', 'row-label', '导入数据（整体覆盖）'));
+  importRow.appendChild(el('div', 'row-label',
+    '恢复设置和梗库（整体覆盖）\n档案不走这里，在上面的「档案」区导入'));
   const fileInput = el('input');
   fileInput.type = 'file';
   fileInput.accept = '.json,application/json';
