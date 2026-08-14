@@ -6,9 +6,7 @@
  */
 
 import * as store from './storage.js';
-import {
-  streamChat, parallelChat, summarizeConversation, ApiError, PROVIDER_PRESETS,
-} from './api.js';
+import { streamChat, summarizeConversation, ApiError } from './api.js';
 import { TIER_LABELS } from './prompts.js';
 import { parseSegments, renderMarkdown } from './markdown.js';
 import {
@@ -22,6 +20,10 @@ let lastStorageWarnAt = 0;
 let generating = false;
 let abortCtrl = null;
 let followStream = false; // 生成期间自动跟随滚动；用户主动滚动即停止跟随
+
+/* 宽屏两栏：左=微信对话流，右=参谋输出流；窄屏塌回单条时间线 */
+const wideMQ = window.matchMedia('(min-width: 900px)');
+const isWide = () => wideMQ.matches;
 
 /* ---------- 保存 ---------- */
 
@@ -62,6 +64,7 @@ export function initChatView() {
     personaArea: document.getElementById('persona-area'),
     conversationArea: document.getElementById('conversation-area'),
     chatArea: document.getElementById('chat-area'),
+    wxArea: document.getElementById('wx-area'),
     input: document.getElementById('chat-input'),
     btnSend: document.getElementById('btn-send'),
     btnSummary: document.getElementById('btn-summary'),
@@ -106,6 +109,11 @@ export function initChatView() {
     if (e.detail && e.detail.source === 'chat') return;
     renderPersona();
   });
+
+  // 跨过宽/窄断点时按新布局重排两栏内容
+  const onModeChange = () => renderChat();
+  if (wideMQ.addEventListener) wideMQ.addEventListener('change', onModeChange);
+  else wideMQ.addListener(onModeChange);
 
   renderAll();
   requestAnimationFrame(() => autogrow(refs.input, 132));
@@ -229,6 +237,8 @@ function createMsgBox(index) {
     scheduleSave();
   });
   ta.addEventListener('focus', () => {
+    // 针对手机键盘弹起的滚动补偿；宽屏粘贴框固定在左栏底部，不需要
+    if (isWide()) return;
     setTimeout(() => ta.scrollIntoView({ block: 'center', behavior: 'smooth' }), 250);
   });
   box.appendChild(ta);
@@ -267,26 +277,63 @@ function maybeAppendBox() {
 /* ---------- 聊天流渲染 ---------- */
 
 function scrollToBottom() {
-  window.scrollTo({ top: document.body.scrollHeight });
+  if (isWide()) {
+    refs.chatArea.scrollTop = refs.chatArea.scrollHeight;
+  } else {
+    window.scrollTo({ top: document.body.scrollHeight });
+  }
+}
+
+function scrollWxToBottom() {
+  if (isWide()) refs.wxArea.scrollTop = refs.wxArea.scrollHeight;
 }
 
 function renderChat() {
+  const wide = isWide();
   refs.chatArea.innerHTML = '';
+  refs.wxArea.innerHTML = '';
+
+  // 宽屏：历轮贴过的微信消息拼成左栏连续记录流
+  if (wide) {
+    const rounds = session.chat.filter((m) => m.role === 'user' && m.convo && m.convo.length);
+    if (rounds.length) {
+      rounds.forEach((m) => refs.wxArea.appendChild(buildWxRound(m.convo)));
+    } else {
+      refs.wxArea.appendChild(el('div', 'wx-empty', '发送后，贴过的微信记录会按顺序留在这里'));
+    }
+  }
+
   if (!session.chat.length) {
-    refs.chatArea.appendChild(buildEmptyHint());
+    refs.chatArea.appendChild(buildEmptyHint(wide));
     return;
   }
   let lastUserIdx = -1;
   session.chat.forEach((m, i) => { if (m.role === 'user') lastUserIdx = i; });
   session.chat.forEach((m, i) => {
-    refs.chatArea.appendChild(buildMessageEl(m, i === lastUserIdx ? i : -1));
+    refs.chatArea.appendChild(buildMessageEl(m, i === lastUserIdx ? i : -1, wide));
   });
   scrollToBottom();
+  scrollWxToBottom();
 }
 
-function buildEmptyHint() {
+/** 左栏里一轮新贴的微信消息（复用时间线里的行样式） */
+function buildWxRound(convo) {
+  const wrap = el('div', 'wx-round');
+  for (const m of convo) {
+    const row = el('div', 'turn-convo-row');
+    row.appendChild(el('span', `mini-tag ${m.role}`, m.role === 'me' ? '我' : '对方'));
+    row.appendChild(el('div', 'turn-convo-text', m.text));
+    wrap.appendChild(row);
+  }
+  return wrap;
+}
+
+function buildEmptyHint(wide) {
   const card = el('div', 'chat-empty');
-  card.appendChild(el('div', 'chat-empty-title', '👋 把微信聊天贴进下方的框里，我帮你分析局面、写回复'));
+  card.appendChild(el('div', 'chat-empty-title',
+    wide
+      ? '👋 把微信聊天贴进左边的框里，我帮你分析局面、写回复'
+      : '👋 把微信聊天贴进下方的框里，我帮你分析局面、写回复'));
   const ul = el('ul');
   for (const tip of [
     '一个框贴一个人的话，对方我交替；同一人连发多条合并贴一个框。「对方/我」标签贴错了可点击切换',
@@ -300,12 +347,15 @@ function buildEmptyHint() {
   return card;
 }
 
-function buildMessageEl(msg, undoIndex = -1) {
+function buildMessageEl(msg, undoIndex = -1, wide = false) {
   if (msg.role === 'user') {
     const row = el('div', 'chat-msg user');
     const wrap = el('div', 'user-wrap');
     if (msg.convo) {
-      wrap.appendChild(buildConvoChunk(msg.convo));
+      // 宽屏：消息本体在左栏，这里只留一个轮次标记；窄屏照旧内联展示
+      wrap.appendChild(wide
+        ? el('div', 'turn-ref', `📎 微信消息 +${msg.convo.length}`)
+        : buildConvoChunk(msg.convo));
     }
     if (msg.text && msg.text.trim()) {
       wrap.appendChild(el('div', 'user-bubble', msg.text));
@@ -321,26 +371,9 @@ function buildMessageEl(msg, undoIndex = -1) {
   }
   const row = el('div', 'chat-msg assistant');
   const card = el('div', 'assistant-card');
-  renderAssistantMessage(card, msg, false);
+  renderAssistantInto(card, msg.content, false);
   row.appendChild(card);
   return row;
-}
-
-/** 渲染完整的 assistant 消息：主参谋内容 +（双参谋时）来源标注和副参谋补充段 */
-function renderAssistantMessage(card, msg, streaming) {
-  renderAssistantInto(card, msg.content, streaming);
-  if (!msg.model && !msg.assist) return;
-  if (msg.model) {
-    card.insertBefore(el('div', 'src-label', `⚡ ${msg.model}`), card.firstChild);
-  }
-  if (msg.assist) {
-    const sec = el('div', 'assist-section');
-    sec.appendChild(el('div', 'src-label', `✦ ${msg.assist.model} · 并行意见`));
-    const sub = el('div');
-    renderAssistantInto(sub, msg.assist.content, false);
-    sec.appendChild(sub);
-    card.appendChild(sec);
-  }
 }
 
 /** 撤回最后一轮：删掉该条与其后的回复，文字退回输入框、消息退回粘贴框 */
@@ -468,14 +501,8 @@ function apiUserContent(m) {
 }
 
 function buildApiChat() {
-  // 并行参谋的意见也拼进上下文，后续「用第二条改一下」这类指代才接得住
   return session.chat.map((m) => (m.role === 'assistant'
-    ? {
-      role: 'assistant',
-      content: m.assist
-        ? `${m.content}\n\n【另一位参谋（${m.assist.model}）对同一请求的意见】\n${m.assist.content}`
-        : m.content,
-    }
+    ? { role: 'assistant', content: m.content }
     : { role: 'user', content: apiUserContent(m) }));
 }
 
@@ -565,62 +592,22 @@ async function generate() {
   const me = store.getMe();
   const apiChat = buildApiChat();
 
-  // 双参谋：配了并行参谋就把同一任务原样发给它，两边各给完整意见
-  const assistPreset = settings.assistProvider && settings.assistApiKey
-    ? PROVIDER_PRESETS.find((p) => p.id === settings.assistProvider)
-    : null;
-  const assistSettings = assistPreset
-    ? {
-      provider: assistPreset.protocol,
-      baseUrl: assistPreset.baseUrl,
-      apiKey: settings.assistApiKey,
-      model: settings.assistModel || assistPreset.defaultModel,
-    }
-    : null;
-  const assistPromise = assistSettings
-    ? parallelChat({
-      persona, memes, me, chat: apiChat, settings: assistSettings,
-      abortSignal: abortCtrl.signal,
-    }).then(
-      (text) => ({ ok: true, text, model: assistSettings.model }),
-      (e) => ({ ok: false, e }),
-    )
-    : null;
-
   const doCall = () => streamChat({
     persona, memes, me, chat: apiChat, settings, onDelta,
-    abortSignal: abortCtrl.signal, dual: !!assistSettings,
+    abortSignal: abortCtrl.signal,
   });
 
   const finish = (text) => {
-    const msg = { role: 'assistant', content: text, model: assistSettings ? settings.model : null };
+    const msg = { role: 'assistant', content: text };
     session.chat.push(msg);
     if (persona && persona.kind === 'profile') {
       store.touchLastContact(persona.profile.id);
       document.dispatchEvent(new CustomEvent('muchat:data-changed', { detail: { source: 'chat' } }));
     }
     persist();
-    renderAssistantMessage(card, msg, false);
+    renderAssistantInto(card, msg.content, false);
     if (followStream) scrollToBottom();
     return msg;
-  };
-
-  /** 主参谋完成后等并行参谋的完整意见；失败只提示，不补位（主意见已完整） */
-  const attachAssist = async (msg) => {
-    const note = el('div', 'typing-note', `✦ ${assistSettings.model} 并行生成中…`);
-    card.appendChild(note);
-    if (followStream) scrollToBottom();
-    const r = await assistPromise;
-    note.remove();
-    if (r.ok) {
-      msg.assist = { model: r.model, content: r.text };
-      persist();
-      renderAssistantMessage(card, msg, false);
-      if (followStream) scrollToBottom();
-    } else if (!(r.e instanceof ApiError && r.e.kind === 'aborted')) {
-      showToast(`✦ ${assistSettings.model} 这轮失败了：`
-        + (r.e instanceof ApiError ? r.e.userMessage : '请重试'), { duration: 3500 });
-    }
   };
 
   try {
@@ -639,9 +626,8 @@ async function generate() {
         throw e;
       }
     }
-    const msg = finish(result.text);
+    finish(result.text);
     if (result.truncated) showToast('输出被截断了，内容可能不完整', { duration: 3000 });
-    if (assistPromise) await attachAssist(msg);
   } catch (e) {
     const aborted = e instanceof ApiError && e.kind === 'aborted';
     if (latest.trim()) {
@@ -771,6 +757,8 @@ function resetSession() {
   autogrow(refs.input, 132);
   renderAll();
   window.scrollTo({ top: 0 });
+  refs.chatArea.scrollTop = 0;
+  refs.wxArea.scrollTop = 0;
 }
 
 async function onNewChat() {

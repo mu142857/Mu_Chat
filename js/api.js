@@ -5,7 +5,6 @@
 
 import {
   buildChatSystemPrompt,
-  DUAL_NOTE,
   buildSummarySystemPrompt,
   buildSummaryUserMessage,
 } from './prompts.js';
@@ -329,11 +328,11 @@ async function readSSE(resp, onData, onActivity) {
  * 调用方可用自己在 onDelta 里攒下的部分文本兜底）。
  * 成功返回 {text, truncated}。
  */
-export async function streamChat({ persona, memes, me, chat, settings, onDelta, abortSignal, dual }) {
+export async function streamChat({ persona, memes, me, chat, settings, onDelta, abortSignal }) {
   const base = validateSettings(settings);
   const { isAnthropic, url, headers, body } = buildRequestParts({
     base, settings,
-    system: buildChatSystemPrompt(persona, memes, me, settings.replyLang) + (dual ? DUAL_NOTE : ''),
+    system: buildChatSystemPrompt(persona, memes, me, settings.replyLang),
     messages: normalizeChatMessages(chat),
     maxTokens: 8192,
     stream: true,
@@ -428,20 +427,6 @@ export async function streamChat({ persona, memes, me, chat, settings, onDelta, 
     clearTimeout(idleTimer);
     if (abortSignal) abortSignal.removeEventListener('abort', onUserAbort);
   }
-}
-
-/**
- * 并行参谋（双参谋模式）：与主参谋拿完全相同的任务，非流式返回完整意见。
- * settings 是并行参谋自己的一套（provider/baseUrl/apiKey/model），失败抛 ApiError。
- */
-export async function parallelChat({ persona, memes, me, chat, settings, abortSignal }) {
-  return callOnce({
-    system: buildChatSystemPrompt(persona, memes, me, settings.replyLang) + DUAL_NOTE,
-    messages: normalizeChatMessages(chat),
-    settings,
-    maxTokens: 8192,
-    abortSignal,
-  });
 }
 
 /**

@@ -435,9 +435,6 @@ export function getSettings() {
       provider: 'anthropic',
       baseUrl: 'https://api.anthropic.com',
       model: doc.model,
-      assistProvider: doc.assistProvider || (doc.assistApiKey ? 'anthropic' : ''),
-      assistApiKey: doc.assistApiKey || '',
-      assistModel: doc.assistModel || '',
       replyLang: doc.replyLang === 'en' ? 'en' : 'zh',
     };
   }
@@ -446,12 +443,6 @@ export function getSettings() {
     provider: doc.provider || DEFAULT_SETTINGS.provider,
     baseUrl: doc.baseUrl !== undefined ? doc.baseUrl : DEFAULT_SETTINGS.baseUrl,
     model: doc.model !== undefined ? doc.model : DEFAULT_SETTINGS.model,
-    // 双参谋：并行参谋自己的服务商/key/模型；provider 或 key 为空 = 未开启
-    // （旧数据只有 key + claude 模型名，补上 provider）
-    assistProvider: doc.assistProvider
-      || (doc.assistApiKey ? 'anthropic' : ''),
-    assistApiKey: doc.assistApiKey || '',
-    assistModel: doc.assistModel || '',
     // 生成的微信消息用什么语言写（块外的分析永远是中文）：'zh' | 'en'
     replyLang: doc.replyLang === 'en' ? 'en' : 'zh',
   };
@@ -575,13 +566,13 @@ export function clearSessionDraft({ keepSelection = true } = {}) {
 
 /** 导出全部数据（明确不含 apiKey；档案/类别在 data/profiles.js 文件里，不经这里） */
 export function exportData() {
-  const { provider, baseUrl, model, assistProvider, assistModel } = getSettings();
+  const { provider, baseUrl, model } = getSettings();
   return {
     app: 'muchat',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: now(),
     memes: readMemes().items,
-    settings: { provider, baseUrl, model, assistProvider, assistModel },
+    settings: { provider, baseUrl, model },
   };
 }
 
@@ -614,7 +605,7 @@ export function importData(parsed) {
   }
   if (parsed.settings && typeof parsed.settings === 'object') {
     const patch = {};
-    for (const k of ['provider', 'baseUrl', 'model', 'assistProvider', 'assistModel']) {
+    for (const k of ['provider', 'baseUrl', 'model']) {
       if (typeof parsed.settings[k] === 'string') patch[k] = parsed.settings[k];
     }
     if (Object.keys(patch).length) updateSettings(patch);

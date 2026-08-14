@@ -58,6 +58,9 @@ textarea, input, select {
 textarea { resize: none; overflow: hidden; line-height: 1.5; }
 textarea:focus, input:focus { border-color: var(--green); }
 
+/* 视图切换靠 hidden 属性；宽屏给 #view-chat 设了 display，需要兜底 */
+.view[hidden] { display: none !important; }
+
 /* ===== 头部与 tab ===== */
 .view-header {
   display: flex;
@@ -228,6 +231,25 @@ textarea:focus, input:focus { border-color: var(--green); }
 .msg-box[data-role="them"] textarea { background: #fbfdff; }
 .msg-box[data-role="me"] textarea { background: #fbfffc; }
 
+/* ===== 两栏容器 ===== */
+/* 窄屏：容器全部塌掉（display:contents），DOM 顺序即时间线顺序：聊天流 → 粘贴框 */
+.chat-layout, .col-left, .col-right { display: contents; }
+.col-head, .wx-area { display: none; }
+
+/* 左栏微信记录流（仅宽屏渲染内容） */
+.wx-round { padding: 8px 0; }
+.wx-round + .wx-round { border-top: 1px dashed var(--line); }
+.wx-empty { font-size: 13px; color: var(--text-2); padding: 8px 2px; }
+
+/* 宽屏时右栏用户轮次里代表"本轮贴了微信消息"的小标记 */
+.turn-ref {
+  font-size: 12px;
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  background: var(--card);
+  padding: 2px 10px;
+}
+
 /* ===== 聊天流 ===== */
 .chat-area {
   display: flex;
@@ -361,19 +383,6 @@ textarea:focus, input:focus { border-color: var(--green); }
   word-break: break-word;
 }
 .bubble-copy { flex-shrink: 0; margin-top: 4px; }
-
-/* 双参谋：来源标注 + 副参谋补充段 */
-.src-label {
-  font-size: 12px;
-  color: var(--text-2);
-  margin: 2px 0 6px;
-  letter-spacing: 0.02em;
-}
-.assist-section {
-  border-top: 1px dashed var(--line);
-  margin-top: 14px;
-  padding-top: 10px;
-}
 
 /* 生成中 */
 .typing-note { color: var(--text-2); font-size: 14px; }
@@ -736,7 +745,87 @@ textarea:focus, input:focus { border-color: var(--green); }
   .dialog { max-width: 400px; }
 }
 
-/* 大屏：再加宽一档 */
-@media (min-width: 1024px) {
-  :root { --content-w: 800px; }
+/* ===== 宽屏两栏：左=微信对话，右=参谋输出，各自独立滚动 ===== */
+@media (min-width: 900px) {
+  :root { --content-w: 1180px; }
+
+  /* 主界面占满视口高度，滚动交给两栏内部 */
+  #view-chat {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--tab-h) - var(--composer-h)
+      - env(safe-area-inset-bottom) - 36px);
+    padding-bottom: 0;
+  }
+  #view-chat .view-header { margin-bottom: 10px; }
+
+  .chat-layout {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .col-left {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    grid-column: 1;
+    grid-row: 1;
+    padding-right: 20px;
+    border-right: 1px solid var(--line);
+  }
+  .col-right {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    grid-column: 2;
+    grid-row: 1;
+    padding-left: 20px;
+  }
+  .col-head {
+    display: block;
+    flex: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+    padding-bottom: 6px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* 左栏：记录流占满剩余高度滚动，粘贴框固定在栏底 */
+  .wx-area {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 10px;
+  }
+  .col-left .compose-convo {
+    flex: none;
+    margin-top: 0;
+    border-top: 1px solid var(--line);
+    padding-top: 10px;
+    max-height: 55%;
+    overflow-y: auto;
+  }
+
+  /* 右栏：参谋流滚动 */
+  .chat-area {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 10px;
+  }
+
+  /* 底部输入条对齐到右栏下方（左半空出来给粘贴区呼吸） */
+  .composer-inner::before {
+    content: '';
+    flex: 0 0 calc(50% + 12px);
+  }
+
+  /* 档案页与弹层不跟着两栏一起变宽 */
+  #view-manage { max-width: 760px; margin: 0 auto; }
+  .sheet { max-width: 480px; }
 }

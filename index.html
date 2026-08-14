@@ -30,13 +30,22 @@
 
       <div id="persona-area" class="persona-area"></div>
 
-      <div id="chat-area" class="chat-area"></div>
-
-      <div class="compose-convo">
-        <div class="compose-convo-head">
-          贴新消息 <span class="convo-hint">一框一个人的话，贴完点发送；没有新消息可留空</span>
+      <!-- 宽屏分两栏：右=参谋输出流，左=微信对话流+粘贴框；窄屏两栏塌回一条时间线 -->
+      <div class="chat-layout">
+        <div class="col-right">
+          <div class="col-head">参谋分析 · 建议</div>
+          <div id="chat-area" class="chat-area"></div>
         </div>
-        <div id="conversation-area" class="conversation-area"></div>
+        <div class="col-left">
+          <div class="col-head">微信对话</div>
+          <div id="wx-area" class="wx-area"></div>
+          <div class="compose-convo">
+            <div class="compose-convo-head">
+              贴新消息 <span class="convo-hint">一框一个人的话，贴完点发送；没有新消息可留空</span>
+            </div>
+            <div id="conversation-area" class="conversation-area"></div>
+          </div>
+        </div>
       </div>
     </section>
 
