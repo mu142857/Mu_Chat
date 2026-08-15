@@ -293,11 +293,20 @@ function renderChat() {
   refs.chatArea.innerHTML = '';
   refs.wxArea.innerHTML = '';
 
-  // 宽屏：历轮贴过的微信消息拼成左栏连续记录流
+  let lastUserIdx = -1;
+  session.chat.forEach((m, i) => { if (m.role === 'user') lastUserIdx = i; });
+
+  // 宽屏：历轮贴过的微信消息拼成左栏连续记录流；
+  // 最后一轮（可撤回的那轮）直接带「撤回重编」按钮，编辑入口就在消息旁边
   if (wide) {
-    const rounds = session.chat.filter((m) => m.role === 'user' && m.convo && m.convo.length);
+    const rounds = [];
+    session.chat.forEach((m, i) => {
+      if (m.role === 'user' && m.convo && m.convo.length) rounds.push([m.convo, i]);
+    });
     if (rounds.length) {
-      rounds.forEach((m) => refs.wxArea.appendChild(buildWxRound(m.convo)));
+      rounds.forEach(([convo, i]) => {
+        refs.wxArea.appendChild(buildWxRound(convo, i === lastUserIdx ? i : -1));
+      });
     } else {
       refs.wxArea.appendChild(el('div', 'wx-empty', '发送后，贴过的微信记录会按顺序留在这里'));
     }
@@ -307,8 +316,6 @@ function renderChat() {
     refs.chatArea.appendChild(buildEmptyHint(wide));
     return;
   }
-  let lastUserIdx = -1;
-  session.chat.forEach((m, i) => { if (m.role === 'user') lastUserIdx = i; });
   session.chat.forEach((m, i) => {
     refs.chatArea.appendChild(buildMessageEl(m, i === lastUserIdx ? i : -1, wide));
   });
@@ -316,14 +323,22 @@ function renderChat() {
   scrollWxToBottom();
 }
 
-/** 左栏里一轮新贴的微信消息（复用时间线里的行样式） */
-function buildWxRound(convo) {
+/** 左栏里一轮新贴的微信消息（复用时间线里的行样式）。undoIndex>=0 时带撤回重编按钮 */
+function buildWxRound(convo, undoIndex = -1) {
   const wrap = el('div', 'wx-round');
   for (const m of convo) {
     const row = el('div', 'turn-convo-row');
     row.appendChild(el('span', `mini-tag ${m.role}`, m.role === 'me' ? '我' : '对方'));
     row.appendChild(el('div', 'turn-convo-text', m.text));
     wrap.appendChild(row);
+  }
+  if (undoIndex >= 0) {
+    const foot = el('div', 'wx-round-foot');
+    const undo = el('button', 'undo-btn', '↩ 撤回重编');
+    undo.title = '撤回这轮消息和参谋回复，内容退回下方粘贴框重新编辑';
+    undo.addEventListener('click', () => onUndo(undoIndex));
+    foot.appendChild(undo);
+    wrap.appendChild(foot);
   }
   return wrap;
 }

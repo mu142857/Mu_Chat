@@ -240,6 +240,7 @@ textarea:focus, input:focus { border-color: var(--green); }
 .wx-round { padding: 8px 0; }
 .wx-round + .wx-round { border-top: 1px dashed var(--line); }
 .wx-empty { font-size: 13px; color: var(--text-2); padding: 8px 2px; }
+.wx-round-foot { display: flex; justify-content: flex-end; margin-top: 4px; }
 
 /* 宽屏时右栏用户轮次里代表"本轮贴了微信消息"的小标记 */
 .turn-ref {
@@ -801,6 +802,7 @@ textarea:focus, input:focus { border-color: var(--green); }
     min-height: 0;
     overflow-y: auto;
     padding-bottom: 10px;
+    padding-right: 8px; /* 内容不贴滚动条 */
   }
   .col-left .compose-convo {
     flex: none;
@@ -817,6 +819,7 @@ textarea:focus, input:focus { border-color: var(--green); }
     min-height: 0;
     overflow-y: auto;
     padding-bottom: 10px;
+    padding-right: 8px; /* 右贴靠的气泡和撤回按钮不被滚动条压住 */
   }
 
   /* 底部输入条对齐到右栏下方（左半空出来给粘贴区呼吸） */
